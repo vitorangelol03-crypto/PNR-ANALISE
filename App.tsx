@@ -821,7 +821,19 @@ const App: React.FC = () => {
                       <tr key={idx} className="hover:bg-blue-50/50 transition-all">
                         <td className="px-6 py-5 flex flex-col gap-1">
                           <span className="font-bold text-gray-800 text-xs uppercase">{stat.name}</span>
-                          {stat.routes?.[0] && <span className="text-[8px] font-black px-1.5 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 w-fit">{stat.routes[0]}</span>}
+                          {stat.routes?.[0] && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedRouteFilter(stat.routes![0]);
+                                // Opcional: scroll para o topo para ver o filtro aplicado
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                              }}
+                              className="text-[8px] font-black px-1.5 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 w-fit hover:bg-blue-600 hover:text-white hover:border-blue-700 transition-all cursor-pointer shadow-sm active:scale-95"
+                            >
+                              {stat.routes[0]}
+                            </button>
+                          )}
                         </td>
                         <td className="px-6 py-5 text-center font-black text-xs">
                           {((stat.revertidos/(stat.totalTickets || 1))*100).toFixed(1)}%
