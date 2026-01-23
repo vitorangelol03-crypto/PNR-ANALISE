@@ -1,0 +1,5 @@
+{
+  "name": "IHS Tickets Dashboard",
+  "description": "Professional corporate dashboard for analyzing IHS tickets from CSV and Excel files, featuring real-time filtering, driver rankings, and interactive data visualization.",
+  "requestFramePermissions": []
+}
