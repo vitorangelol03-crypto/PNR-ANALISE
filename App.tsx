@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -398,17 +397,13 @@ const App: React.FC = () => {
     const activeData = allData.filter(item => !driverOverrides[item.driver]?.isExcluded);
 
     // --- Lógica de Mapeamento de Rota Mestra por Motorista ---
-    // Precisamos saber qual a rota de cada motorista para os tickets que não têm SPXTN mapeado
     const driverRouteCounts: Record<string, Record<string, number>> = {};
 
     activeData.forEach(item => {
       let currentRoute = '';
-      
-      // 1. Prioridade absoluta: Override manual (Vínculo)
       if (driverOverrides[item.driver]?.route) {
         currentRoute = driverOverrides[item.driver].route;
       } else {
-        // 2. Mapeamento via SPXTN -> CEP -> Cidade
         const rawCep = routeMap[item.spxtn];
         if (rawCep) {
           currentRoute = cityCache[rawCep] || `CEP ${rawCep}`;
@@ -421,7 +416,6 @@ const App: React.FC = () => {
       }
     });
 
-    // Determinar a rota predominante de cada motorista
     const driverPreferredRoute: Record<string, string> = {};
     Object.entries(driverRouteCounts).forEach(([driver, routes]) => {
       const sortedRoutes = Object.entries(routes).sort((a, b) => b[1] - a[1]);
@@ -430,26 +424,18 @@ const App: React.FC = () => {
       }
     });
 
-    // Função para obter a rota final de um ticket com lógica de fallback
     const getTicketFinalRoute = (item: IHSTicket) => {
-      // 1. Tentar override manual direto
       if (driverOverrides[item.driver]?.route) return driverOverrides[item.driver].route;
-      
-      // 2. Tentar mapeamento SPXTN direto
       const rawCep = routeMap[item.spxtn];
       if (rawCep) {
         const cityInfo = cityCache[rawCep];
         if (cityInfo) return cityInfo;
         return `CEP ${rawCep}`;
       }
-
-      // 3. Fallback: Usar a rota predominante que esse motorista já teve em outros tickets
       if (driverPreferredRoute[item.driver]) return driverPreferredRoute[item.driver];
-
       return 'Não Mapeado';
     };
 
-    // Filtro de busca (barra de pesquisa e status)
     const filteredBySearch = activeData.filter(item => {
       const matchSearch = item.driver.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           item.ticketId.toLowerCase().includes(searchTerm.toLowerCase());
@@ -457,7 +443,6 @@ const App: React.FC = () => {
       return matchSearch && matchStatus;
     });
 
-    // Processamento das Rotas (Monitoramento)
     filteredBySearch.forEach(item => {
       const route = getTicketFinalRoute(item);
       if (!rMap[route]) {
@@ -470,13 +455,11 @@ const App: React.FC = () => {
       if (item.status === TicketStatus.ForBilling) r.faturados++; else r.revertidos++;
     });
 
-    // Filtro final do Dashboard (Seletor Global de Rota)
     const finalFiltered = filteredBySearch.filter(item => {
       if (selectedRouteFilter === 'All') return true;
       return getTicketFinalRoute(item) === selectedRouteFilter;
     });
 
-    // Processamento dos Motoristas (Ranking)
     finalFiltered.forEach(item => {
       if (!dMap[item.driver]) {
         dMap[item.driver] = { name: item.driver, totalTickets: 0, totalValue: 0, faturados: 0, faturadosValue: 0, revertidos: 0, revertidosValue: 0, routes: [] };
@@ -800,7 +783,6 @@ const App: React.FC = () => {
               <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">▼</div>
             </div>
           </div>
-          {/* Botão de reset de filtros pintado de azul e sempre liberado */}
           <button 
             onClick={() => {setSelectedRouteFilter('All'); setSelectedStatus('All'); setSearchTerm('');}} 
             className="mt-5 px-6 py-3 bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-xl text-xs font-black shadow-md transition-all active:scale-95"
@@ -902,7 +884,10 @@ const App: React.FC = () => {
                             </button>
                           )}
                         </td>
-                        <td className="px-6 py-5 text-center font-black text-xs">
+                        <td 
+                          className="px-6 py-5 text-center font-black text-xs cursor-help" 
+                          title={`${stat.faturados} tickets faturados`}
+                        >
                           {((stat.revertidos/(stat.totalTickets || 1))*100).toFixed(1)}%
                         </td>
                         <td className="px-6 py-5 text-center font-bold text-gray-700 text-xs">{stat.totalTickets}</td>
