@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -203,7 +204,6 @@ const App: React.FC = () => {
         await supabase.from('driver_overrides').upsert({ 
           driver_name: driverName, 
           overridden_route: merged.route, 
-          // Fix: Property 'is_excluded' should use 'merged.isExcluded' from the DriverOverride interface
           is_excluded: merged.isExcluded 
         });
         setDriverOverrides(prev => ({ ...prev, [driverName]: merged }));
@@ -223,6 +223,37 @@ const App: React.FC = () => {
       setReferenceDate('');
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleResetEverything = async () => {
+    if (!confirm("⚠️ ATENÇÃO CRÍTICA: Isso apagará DEFINITIVAMENTE todos os Dados, Rotas, Vínculos e Cache de cidades de TODO o banco de dados. Esta ação é irreversível. Deseja prosseguir?")) return;
+    
+    setIsDeleting(true);
+    try {
+      // Deletar de todas as tabelas
+      await Promise.all([
+        supabase.from('tickets').delete().neq('ticket_id', '0_ignore_internal'),
+        supabase.from('route_mapping').delete().neq('spxtn', '0_ignore_internal'),
+        supabase.from('city_cache').delete().neq('cep', '0_ignore_internal'),
+        supabase.from('driver_overrides').delete().neq('driver_name', '0_ignore_internal'),
+        supabase.from('dashboard_meta').delete().neq('key', '0_ignore_internal')
+      ]);
+      
+      // Limpar estado local
+      setAllData([]);
+      setRouteMap({});
+      setCityCache({});
+      setDriverOverrides({});
+      setReferenceDate('');
+      
+      alert("Sistema e Banco de Dados resetados com sucesso!");
+      location.reload(); // Recarregar para garantir estado limpo
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao resetar o sistema.");
     } finally {
       setIsDeleting(false);
     }
@@ -696,12 +727,21 @@ const App: React.FC = () => {
         </div>
         
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 md:gap-4">
+          <button 
+            onClick={() => withAdmin(handleResetEverything)}
+            className={`flex items-center justify-center gap-1.5 px-3 py-2 md:px-4 md:py-2.5 rounded-xl font-black text-[9px] md:text-xs border transition-all active:scale-95 ${isAdmin ? 'bg-red-600 text-white border-red-700 shadow-lg shadow-red-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
+          >
+            {isAdmin ? '🔥' : '🔒'} RESET TOTAL
+          </button>
+          
           <button onClick={() => withAdmin(clearAllTickets)} className={`flex items-center justify-center gap-1.5 px-3 py-2 md:px-4 md:py-2.5 rounded-xl font-black text-[9px] md:text-xs border transition-all ${isAdmin ? 'bg-red-50 text-red-600 border-red-100' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
             {isAdmin ? '🗑️' : '🔒'} Limpar
           </button>
+          
           <button onClick={() => withAdmin(() => setShowDriverMgmtModal(true))} className="bg-gray-100 text-[#1e3a8a] px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-black flex items-center justify-center gap-1.5 text-[9px] md:text-xs border border-gray-200">
             {isAdmin ? '👤' : '🔒'} Vínculos
           </button>
+          
           <button onClick={() => withAdmin(() => document.getElementById('import-tickets-input')?.click())} className="bg-[#3b82f6] text-white px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 text-[9px] md:text-xs shadow-md">
             {isAdmin ? '📥' : '🔒'} Importar
           </button>
