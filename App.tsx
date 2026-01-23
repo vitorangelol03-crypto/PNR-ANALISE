@@ -137,6 +137,11 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRouteClick = (route: string) => {
+    setSelectedRouteFilter(route);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const fetchCityInfo = async (cep: string) => {
     const cleanCep = cep.replace(/\D/g, '');
     if (cleanCep.length !== 8) return null;
@@ -464,10 +469,11 @@ const App: React.FC = () => {
     const sortByPerf = (a: any, b: any) => (b.revertidos / b.totalTickets) - (a.revertidos / a.totalTickets);
 
     return { 
-      topDrivers: [...relevantDrivers].sort(sortByPerf).slice(0, 4),
-      bottomDrivers: [...relevantDrivers].sort((a, b) => sortByPerf(b, a)).slice(0, 4),
-      topRoutes: [...relevantRoutes].sort(sortByPerf).slice(0, 4),
-      bottomRoutes: [...relevantRoutes].sort((a, b) => sortByPerf(b, a)).slice(0, 4)
+      topDrivers: [...relevantDrivers].sort(sortByPerf).slice(0, 5),
+      bottomDrivers: [...relevantDrivers].sort((a, b) => sortByPerf(b, a)).slice(0, 5),
+      topVolumeDrivers: [...stats.drivers].sort((a, b) => b.totalTickets - a.totalTickets).slice(0, 5),
+      topRoutes: [...relevantRoutes].sort(sortByPerf).slice(0, 5),
+      bottomRoutes: [...stats.routes].sort((a, b) => b.totalTickets - a.totalTickets).slice(0, 5) 
     };
   }, [stats]);
 
@@ -680,26 +686,32 @@ const App: React.FC = () => {
               onClick={() => withAdmin(clearAllTickets)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-black text-xs border transition-all active:scale-95 ${isAdmin ? 'bg-red-50 text-red-600 border-red-100' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
             >
-              {isAdmin ? '🗑️ Limpar Tickets' : '🔒 Limpar'}
+              {isAdmin ? '🗑️' : '🔒'} Limpar
             </button>
           )}
           <button 
             onClick={() => withAdmin(() => setShowDriverMgmtModal(true))}
             className="bg-gray-100 hover:bg-gray-200 text-[#1e3a8a] px-5 py-2.5 rounded-xl font-black flex items-center gap-2 text-xs shadow-sm transition-all active:scale-95 border border-gray-200"
           >
-            {isAdmin ? '👤 Gerenciar Vínculos' : '🔒 Vínculos'}
+            {isAdmin ? '👤' : '🔒'} Vínculos
           </button>
-          <label className="cursor-pointer bg-[#3b82f6] hover:bg-[#2563eb] text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 text-xs shadow-md transition-all active:scale-95">
-            {isAdmin ? '📥 Importar Tickets' : '🔒 Importar'}
-            {isAdmin && <input type="file" className="hidden" accept=".csv, .xlsx, .xls" onChange={handleFileUpload} />}
-            {!isAdmin && <button onClick={() => withAdmin(() => {})} className="absolute inset-0 opacity-0"></button>}
-          </label>
+          <button 
+            onClick={() => withAdmin(() => document.getElementById('import-tickets-input')?.click())}
+            className="bg-[#3b82f6] hover:bg-[#2563eb] text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 text-xs shadow-md transition-all active:scale-95"
+          >
+            {isAdmin ? '📥' : '🔒'} Importar
+          </button>
+          <input id="import-tickets-input" type="file" className="hidden" accept=".csv, .xlsx, .xls" onChange={handleFileUpload} />
+          
           <div className="flex gap-1">
-            <label className="cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-l-xl font-bold flex items-center gap-2 text-xs shadow-md transition-all active:scale-95 border-r border-emerald-500/30">
-              {isAdmin ? '🗺️ Sincronizar Rotas' : '🔒 Rotas'}
-              {isAdmin && <input type="file" className="hidden" accept=".csv, .xlsx, .xls" onChange={handleRouteFileUpload} />}
-              {!isAdmin && <button onClick={() => withAdmin(() => {})} className="absolute inset-0 opacity-0"></button>}
-            </label>
+            <button 
+              onClick={() => withAdmin(() => document.getElementById('import-routes-input')?.click())}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-l-xl font-bold flex items-center gap-2 text-xs shadow-md transition-all active:scale-95 border-r border-emerald-500/30"
+            >
+              {isAdmin ? '🗺️' : '🔒'} Rotas
+            </button>
+            <input id="import-routes-input" type="file" className="hidden" accept=".csv, .xlsx, .xls" onChange={handleRouteFileUpload} />
+            
             {routeCount > 0 && (
               <button 
                 onClick={() => withAdmin(() => setShowDeleteModal(true))}
@@ -740,7 +752,13 @@ const App: React.FC = () => {
               <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">▼</div>
             </div>
           </div>
-          <button onClick={() => {setSelectedRouteFilter('All'); setSelectedStatus('All'); setSearchTerm('');}} className="mt-5 px-6 py-3 bg-gray-200 hover:bg-gray-300 text-gray-600 rounded-xl text-xs font-black transition-colors">Resetar Filtros</button>
+          {/* Botão de reset de filtros pintado de azul e sempre liberado */}
+          <button 
+            onClick={() => {setSelectedRouteFilter('All'); setSelectedStatus('All'); setSearchTerm('');}} 
+            className="mt-5 px-6 py-3 bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-xl text-xs font-black shadow-md transition-all active:scale-95"
+          >
+            Resetar Filtros
+          </button>
         </div>
       )}
 
@@ -759,18 +777,21 @@ const App: React.FC = () => {
             <StatCard label="PNR Geral" value={formatCurrency(totals.value)} icon="💰" color="amber" />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <InsightList title="Top 4 Melhores Profissionais" icon="🏆" type="best">
-              {insights.topDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} detail={`${d.totalTickets} tks`} type="best" />)}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+            <InsightList title="Top 5 Melhores Profissionais" icon="🏆" type="best">
+              {insights.topDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} detail={`${d.totalTickets} tks`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="best" />)}
             </InsightList>
-            <InsightList title="Top 4 Piores Profissionais" icon="⚠️" type="worst">
-              {insights.bottomDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} detail={`Perda: ${formatCurrency(d.faturadosValue)}`} type="worst" />)}
+            <InsightList title="Top 5 Maior Volume (Crítico)" icon="🚨" type="worst">
+              {insights.topVolumeDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={d.totalTickets} detail={`Total de Tickets`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="worst" />)}
             </InsightList>
-            <InsightList title="Top 4 Rotas Eficientes" icon="📍" type="best">
+            <InsightList title="Top 5 Piores Profissionais" icon="⚠️" type="worst">
+              {insights.bottomDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} detail={`Perda: ${formatCurrency(d.faturadosValue)}`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="worst" />)}
+            </InsightList>
+            <InsightList title="Top 5 Rotas Eficientes" icon="📍" type="best">
               {insights.topRoutes.map((r, i) => <CompactHighlight key={i} name={r.locationName} metric={`${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} detail={`${r.totalTickets} tickets`} type="best" />)}
             </InsightList>
-            <InsightList title="Top 4 Rotas Críticas" icon="📉" type="worst">
-              {insights.bottomRoutes.map((r, i) => <CompactHighlight key={i} name={r.locationName} metric={`${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} detail={`Vol: ${r.totalTickets} tks`} type="worst" />)}
+            <InsightList title="Top 5 Rotas Críticas (Volume)" icon="📉" type="worst">
+              {insights.bottomRoutes.map((r, i) => <CompactHighlight key={i} name={r.locationName} metric={r.totalTickets} detail={`Taxa: ${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} type="worst" />)}
             </InsightList>
           </div>
 
@@ -825,9 +846,7 @@ const App: React.FC = () => {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelectedRouteFilter(stat.routes![0]);
-                                // Opcional: scroll para o topo para ver o filtro aplicado
-                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                                handleRouteClick(stat.routes![0]);
                               }}
                               className="text-[8px] font-black px-1.5 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 w-fit hover:bg-blue-600 hover:text-white hover:border-blue-700 transition-all cursor-pointer shadow-sm active:scale-95"
                             >
@@ -871,10 +890,26 @@ const InsightList = ({ title, icon, type, children }: any) => (
   </div>
 );
 
-const CompactHighlight = ({ name, metric, detail, type }: any) => (
+const CompactHighlight = ({ name, metric, detail, type, route, onRouteClick }: any) => (
   <div className="flex items-center justify-between p-2 rounded-xl bg-gray-50 border border-gray-100">
-    <div className="flex flex-col"><span className="text-[11px] font-black text-gray-800 uppercase line-clamp-1">{name}</span><span className="text-[9px] text-gray-400">{detail}</span></div>
-    <span className={`text-sm font-black ${type === 'best' ? 'text-emerald-600' : 'text-red-600'}`}>{metric}</span>
+    <div className="flex flex-col gap-0.5 overflow-hidden">
+      <span className="text-[11px] font-black text-gray-800 uppercase line-clamp-1 truncate">{name}</span>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[9px] text-gray-400 whitespace-nowrap">{detail}</span>
+        {route && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRouteClick?.(route);
+            }}
+            className="text-[7px] font-black px-1.5 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-600 hover:text-white hover:border-blue-700 transition-all cursor-pointer shadow-sm active:scale-95"
+          >
+            {route}
+          </button>
+        )}
+      </div>
+    </div>
+    <span className={`text-sm font-black shrink-0 ${type === 'best' ? 'text-emerald-600' : 'text-red-600'}`}>{metric}</span>
   </div>
 );
 
