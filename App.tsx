@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -12,15 +13,71 @@ interface DriverOverride {
   isExcluded: boolean;
 }
 
+// Lista de distritos oficiais de Caratinga para separação de rotas
+const CARATINGA_DISTRICTS = [
+  'dom lara', 
+  'dom modesto', 
+  'patrocinio', 
+  'santa efigenia',
+  'santa luzia', 
+  'santo antonio do manhuacu', 
+  'sapucaia', 
+  'sao candido', 
+  'sao joao do jacutinga',
+  'cordeiro de minas'
+];
+
+const normalizeText = (text: string) => 
+  text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+// Componente de Modal de Confirmação Customizado
+const ConfirmModal = ({ show, title, message, onConfirm, onCancel, confirmText = "Confirmar", isDanger = false }: any) => {
+  if (!show) return null;
+  return (
+    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-full shadow-2xl scale-in-center border border-gray-100">
+        <div className="text-4xl mb-4 text-center">{isDanger ? '⚠️' : '❓'}</div>
+        <h2 className="text-xl font-black text-center text-gray-800 uppercase tracking-tight">{title}</h2>
+        <p className="text-gray-500 text-sm text-center mt-3 leading-relaxed">{message}</p>
+        <div className="flex flex-col gap-2 mt-8">
+          <button 
+            onClick={onConfirm}
+            className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 ${isDanger ? 'bg-red-600 text-white shadow-lg shadow-red-200' : 'bg-blue-600 text-white shadow-lg shadow-blue-200'}`}
+          >
+            {confirmText}
+          </button>
+          <button 
+            onClick={onCancel}
+            className="w-full py-4 bg-gray-100 text-gray-500 rounded-2xl font-black text-xs uppercase hover:bg-gray-200 transition-all"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const [allData, setAllData] = useState<IHSTicket[]>([]);
   const [routeMap, setRouteMap] = useState<Record<string, string>>({});
   const [cityCache, setCityCache] = useState<Record<string, string>>({});
   const [driverOverrides, setDriverOverrides] = useState<Record<string, DriverOverride>>({});
   const [referenceDate, setReferenceDate] = useState<string>('');
+  const [refreshKey, setRefreshKey] = useState<number>(0); // Gatilho para re-enriquecer CEPs
 
-  // Segurança
-  const [isAdmin, setIsAdmin] = useState<boolean>(() => sessionStorage.getItem('ihs_admin') === 'true');
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('ihs_admin') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [confirmModal, setConfirmModal] = useState<{show: boolean, type: string, title: string, message: string, isDanger?: boolean}>({
+    show: false, type: '', title: '', message: ''
+  });
+
   const [showPassModal, setShowPassModal] = useState(false);
   const [passInput, setPassInput] = useState('');
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
@@ -29,7 +86,7 @@ const App: React.FC = () => {
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [isFetchingCities, setIsFetchingCities] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  
   const [showDriverMgmtModal, setShowDriverMgmtModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   
@@ -48,7 +105,6 @@ const App: React.FC = () => {
   const [driverSortKey, setDriverSortKey] = useState<SortKey>('performance');
   const [driverSortOrder, setDriverSortOrder] = useState<'asc' | 'desc'>('desc');
 
-  // Carregar dados iniciais do Supabase
   useEffect(() => {
     const loadInitialData = async () => {
       setIsLoadingSupabase(true);
@@ -114,7 +170,9 @@ const App: React.FC = () => {
     e?.preventDefault();
     if (passInput === '684171') {
       setIsAdmin(true);
-      sessionStorage.setItem('ihs_admin', 'true');
+      try {
+        sessionStorage.setItem('ihs_admin', 'true');
+      } catch {}
       setShowPassModal(false);
       setPassInput('');
       if (pendingAction) {
@@ -122,7 +180,6 @@ const App: React.FC = () => {
         setPendingAction(null);
       }
     } else {
-      alert('Senha incorreta!');
       setPassInput('');
     }
   };
@@ -142,7 +199,7 @@ const App: React.FC = () => {
   };
 
   const fetchCityInfo = async (cep: string) => {
-    const cleanCep = cep.replace(/\D/g, '');
+    const cleanCep = (cep as string).replace(/\D/g, '');
     if (cleanCep.length !== 8) return null;
     if (cityCache[cleanCep]) return cityCache[cleanCep];
 
@@ -150,16 +207,31 @@ const App: React.FC = () => {
       const response = await fetch(`https://brasilapi.com.br/api/cep/v1/${cleanCep}`);
       if (response.ok) {
         const data = await response.json();
-        
-        let info = '';
-        const neighborhood = data.neighborhood?.trim();
-        const city = data.city?.trim();
-        const state = data.state?.trim();
+        const neighborhood = data.neighborhood?.trim() || '';
+        const city = data.city?.trim() || '';
+        const state = data.state?.trim() || '';
 
-        if (neighborhood && neighborhood.toLowerCase() !== 'centro' && neighborhood !== city) {
-          info = `${neighborhood} - ${city}, ${state}`;
+        let info = '';
+        
+        // REGRA ESPECIAL CARATINGA: Agrupar bairros/ruas e separar distritos
+        if (normalizeText(city) === 'caratinga') {
+          const normalizedNeighborhood = normalizeText(neighborhood);
+          const isDistrict = CARATINGA_DISTRICTS.some(d => normalizedNeighborhood.includes(normalizeText(d)));
+          
+          if (isDistrict) {
+            // Se for distrito, mantém o nome do distrito para separar a rota
+            info = `${neighborhood} - ${city}, ${state}`;
+          } else {
+            // Se for bairro urbano ou centro, agrupa em "Caratinga, MG"
+            info = `Caratinga, ${state}`; 
+          }
         } else {
-          info = `${city}, ${state}`;
+          // Lógica padrão para outras cidades (Distritos costumam ter bairro preenchido)
+          if (neighborhood && neighborhood.toLowerCase() !== 'centro' && neighborhood !== city) {
+            info = `${neighborhood} - ${city}, ${state}`;
+          } else {
+            info = `${city}, ${state}`;
+          }
         }
 
         await supabase.from('city_cache').upsert({ cep: cleanCep, city_info: info });
@@ -173,8 +245,8 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const enrichCeps = async () => {
-      const uniqueCeps = Array.from(new Set(Object.values(routeMap)));
-      const missingCeps = uniqueCeps.filter(cep => cep && !cityCache[cep.replace(/\D/g, '')]);
+      const uniqueCeps = Array.from(new Set(Object.values(routeMap) as string[]));
+      const missingCeps = uniqueCeps.filter((cep: string) => cep && !cityCache[cep.replace(/\D/g, '')]);
 
       if (missingCeps.length > 0) {
         setIsFetchingCities(true);
@@ -182,14 +254,14 @@ const App: React.FC = () => {
         let hasNewData = false;
         
         for (const cep of missingCeps) {
-          const clean = cep.replace(/\D/g, '');
+          const clean = (cep as string).replace(/\D/g, '');
           if (clean.length === 8) {
             const info = await fetchCityInfo(clean);
             if (info) {
               newCache[clean] = info;
               hasNewData = true;
             }
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 250)); // Delay otimizado
           }
         }
         
@@ -198,27 +270,36 @@ const App: React.FC = () => {
       }
     };
     if (Object.keys(routeMap).length > 0) enrichCeps();
-  }, [routeMap]);
+  }, [routeMap, refreshKey]);
 
-  const handleRefreshCeps = async () => {
-    if (!confirm("Isso irá forçar o sistema a pesquisar todos os CEPs novamente na API para atualizar distritos e nomes. Deseja continuar?")) return;
+  const triggerConfirm = (type: string, title: string, message: string, isDanger: boolean = false) => {
+    setConfirmModal({ show: true, type, title, message, isDanger });
+  };
+
+  const handleModalConfirm = () => {
+    const type = confirmModal.type;
+    setConfirmModal({ ...confirmModal, show: false });
     
+    if (type === 'refresh_ceps') executeRefreshCeps();
+    if (type === 'clear_tickets') executeClearAllTickets();
+    if (type === 'reset_everything') executeResetEverything();
+    if (type === 'delete_routes') executeDeleteRoutes();
+  };
+
+  const executeRefreshCeps = async () => {
     setIsFetchingCities(true);
     try {
-      const cepsToRefresh = Array.from(new Set(Object.values(routeMap))).map(c => c.replace(/\D/g, ''));
-      
+      const cepsToRefresh = Array.from(new Set(Object.values(routeMap) as string[])).map((c: string) => c.replace(/\D/g, ''));
       if (cepsToRefresh.length > 0) {
+        // Limpa no Supabase e no estado local para forçar o enrichment
         await supabase.from('city_cache').delete().in('cep', cepsToRefresh);
         setCityCache({});
-        alert("Cache limpo! O sistema começará a re-mapear os CEPs automaticamente.");
-      } else {
-        alert("Nenhum CEP mapeado para atualizar.");
+        setRefreshKey(prev => prev + 1); // Dispara o useEffect
       }
     } catch (err) {
-      console.error(err);
-      alert("Erro ao atualizar CEPs.");
+      console.error("Erro ao atualizar ceps:", err);
     } finally {
-      setIsFetchingCities(false);
+      // setIsFetchingCities(false) é tratado pelo useEffect de enriquecimento
     }
   };
 
@@ -227,7 +308,6 @@ const App: React.FC = () => {
       const current = driverOverrides[driverName] || { route: "", isExcluded: false };
       const merged = { ...current, ...updates };
 
-      // Fix: Use merged.isExcluded instead of merged.is_excluded to match DriverOverride interface
       if (merged.route === "" && !merged.isExcluded) {
         await supabase.from('driver_overrides').delete().eq('driver_name', driverName);
         const newOverrides = { ...driverOverrides };
@@ -237,8 +317,7 @@ const App: React.FC = () => {
         await supabase.from('driver_overrides').upsert({ 
           driver_name: driverName, 
           overridden_route: merged.route, 
-          // Fix: Use merged.isExcluded instead of merged.is_excluded to match DriverOverride interface
-          is_excluded: merged.isExcluded 
+          is_excluded: merged.is_excluded 
         });
         setDriverOverrides(prev => ({ ...prev, [driverName]: merged }));
       }
@@ -247,8 +326,7 @@ const App: React.FC = () => {
     }
   };
 
-  const clearAllTickets = async () => {
-    if (!confirm("Isso apagará TODOS os tickets do sistema e da nuvem. Deseja continuar?")) return;
+  const executeClearAllTickets = async () => {
     setIsDeleting(true);
     try {
       await supabase.from('tickets').delete().neq('ticket_id', '0_ignore');
@@ -262,9 +340,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleResetEverything = async () => {
-    if (!confirm("⚠️ ATENÇÃO CRÍTICA: Isso apagará DEFINITIVAMENTE todos os Dados, Rotas, Vínculos e Cache de cidades de TODO o banco de dados. Esta ação é irreversível. Deseja prosseguir?")) return;
-    
+  const executeResetEverything = async () => {
     setIsDeleting(true);
     try {
       await Promise.all([
@@ -280,32 +356,26 @@ const App: React.FC = () => {
       setCityCache({});
       setDriverOverrides({});
       setReferenceDate('');
-      
-      alert("Sistema e Banco de Dados resetados com sucesso!");
       location.reload();
     } catch (err) {
       console.error(err);
-      alert("Erro ao resetar o sistema.");
     } finally {
       setIsDeleting(false);
     }
   };
 
-  const confirmClearDatabase = async () => {
+  const executeDeleteRoutes = async () => {
     setIsDeleting(true);
     try {
       const { error } = await supabase.from('route_mapping').delete().neq('spxtn', '0_ignore');
       if (!error) {
         setRouteMap({});
         location.reload();
-      } else {
-        alert("Erro ao apagar dados do banco.");
       }
     } catch (err) {
       console.error(err);
     } finally {
       setIsDeleting(false);
-      setShowDeleteModal(false);
     }
   };
 
@@ -318,24 +388,27 @@ const App: React.FC = () => {
     const parseRows = (rows: any[][]) => {
       const dataRows = (rows[0]?.[0]?.toString().toLowerCase().includes('id')) ? rows.slice(1) : rows;
       
-      const seenIds = new Set<string>();
+      const seenSpxtn = new Set<string>();
       let dups = 0;
       const processed: IHSTicket[] = [];
 
       dataRows.forEach((row) => {
-        const ticketId = String(row[0] || '').trim();
-        if (!ticketId) return;
+        const ticketIdRaw = String(row[0] || '').trim();
+        const spxtnCode = String(row[2] || '').trim(); // SPXTN está na Coluna C (índice 2)
 
-        if (seenIds.has(ticketId)) {
+        if (!spxtnCode) return;
+
+        if (seenSpxtn.has(spxtnCode)) {
           dups++;
           return;
         }
 
-        seenIds.add(ticketId);
+        seenSpxtn.add(spxtnCode);
+        
         processed.push({
-          ticketId,
+          ticketId: ticketIdRaw || `TEMP_${spxtnCode}`,
           taskId: String(row[1] || ''),
-          spxtn,
+          spxtn: spxtnCode,
           driver: String(row[3] || 'Desconhecido').replace(/\d+/g, '').replace(/[\[\]]/g, '').replace(/\s+/g, ' ').trim(),
           station: String(row[4] || ''),
           slaDeadline: String(row[5] || ''),
@@ -389,13 +462,10 @@ const App: React.FC = () => {
         if (upsertData.length > 0) {
           const { error } = await supabase.from('route_mapping').upsert(upsertData, { onConflict: 'spxtn' });
           if (error) throw error;
-          
           setRouteMap(prev => ({ ...prev, ...newMapping }));
-          alert("Mapeamento de rotas atualizado com sucesso!");
         }
       } catch (err) {
         console.error("Erro ao importar rotas:", err);
-        alert("Erro ao importar rotas.");
       } finally {
         setIsProcessingFile(false);
         if (event.target) event.target.value = "";
@@ -414,10 +484,7 @@ const App: React.FC = () => {
   };
 
   const confirmImport = async () => {
-    if (!inputRefDate) {
-      alert("Por favor, informe a data de referência.");
-      return;
-    }
+    if (!inputRefDate) return;
     setIsProcessingFile(true);
     try {
       await supabase.from('tickets').delete().neq('ticket_id', '0_ignore');
@@ -444,10 +511,8 @@ const App: React.FC = () => {
       setAllData(tempTickets);
       setReferenceDate(inputRefDate);
       setShowImportModal(false);
-      alert("Importação concluída e salva na nuvem!");
     } catch (err) {
       console.error(err);
-      alert("Erro ao salvar dados.");
     } finally {
       setIsProcessingFile(false);
     }
@@ -458,7 +523,6 @@ const App: React.FC = () => {
     const rMap: Record<string, RouteStats> = {};
     
     const activeData = allData.filter(item => !driverOverrides[item.driver]?.isExcluded);
-
     const driverRouteCounts: Record<string, Record<string, number>> = {};
 
     activeData.forEach(item => {
@@ -481,9 +545,7 @@ const App: React.FC = () => {
     const driverPreferredRoute: Record<string, string> = {};
     Object.entries(driverRouteCounts).forEach(([driver, routes]) => {
       const sortedRoutes = Object.entries(routes).sort((a, b) => b[1] - a[1]);
-      if (sortedRoutes.length > 0) {
-        driverPreferredRoute[driver] = sortedRoutes[0][0];
-      }
+      if (sortedRoutes.length > 0) driverPreferredRoute[driver] = sortedRoutes[0][0];
     });
 
     const getTicketFinalRoute = (item: IHSTicket) => {
@@ -529,10 +591,8 @@ const App: React.FC = () => {
       const d = dMap[item.driver];
       d.totalTickets++;
       d.totalValue += item.pnrValue;
-
       const currentRoute = getTicketFinalRoute(item);
       if (!d.routes?.includes(currentRoute)) d.routes?.push(currentRoute);
-
       if (item.status === TicketStatus.ForBilling) {
         d.faturados++;
         d.faturadosValue += item.pnrValue;
@@ -543,8 +603,8 @@ const App: React.FC = () => {
     });
 
     return { 
-      drivers: Object.values(dMap), 
-      routes: Object.values(rMap), 
+      drivers: Object.values(dMap) as DriverStats[], 
+      routes: Object.values(rMap) as RouteStats[], 
       filtered: finalFiltered 
     };
   }, [allData, routeMap, cityCache, searchTerm, selectedStatus, selectedRouteFilter, driverOverrides]);
@@ -564,7 +624,6 @@ const App: React.FC = () => {
     const relevantDrivers = stats.drivers.filter(d => d.totalTickets > 10);
     const relevantRoutes = stats.routes.filter(r => r.totalTickets > 10);
     const sortByPerf = (a: any, b: any) => (b.revertidos / b.totalTickets) - (a.revertidos / a.totalTickets);
-
     return { 
       topDrivers: [...relevantDrivers].sort(sortByPerf).slice(0, 5),
       bottomDrivers: [...relevantDrivers].sort((a, b) => sortByPerf(b, a)).slice(0, 5),
@@ -574,10 +633,9 @@ const App: React.FC = () => {
     };
   }, [stats]);
 
-  const routeList = useMemo(() => Array.from(new Set(stats.routes.map(r => r.locationName))).sort(), [stats.routes]);
-
+  const routeList = useMemo(() => Array.from(new Set(stats.routes.map(r => r.locationName))).sort() as string[], [stats.routes]);
   const uniqueDriversFromData = useMemo(() => {
-    const names = Array.from(new Set(allData.map(d => d.driver))).sort();
+    const names = Array.from(new Set(allData.map(d => d.driver))).sort() as string[];
     return names.filter(n => n.toLowerCase().includes(mgmtSearch.toLowerCase()));
   }, [allData, mgmtSearch]);
 
@@ -587,7 +645,7 @@ const App: React.FC = () => {
   [stats.routes, routeSearch]);
 
   const filteredPerformanceStats = useMemo(() => {
-    let list = stats.drivers.filter(s => s.name.toLowerCase().includes(performanceSearch.toLowerCase()));
+    let list = (stats.drivers as DriverStats[]).filter(s => s.name.toLowerCase().includes(performanceSearch.toLowerCase()));
     list.sort((a, b) => {
       let valA: any = a[driverSortKey as keyof DriverStats];
       let valB: any = b[driverSortKey as keyof DriverStats];
@@ -608,10 +666,19 @@ const App: React.FC = () => {
 
   const handlePerformanceSearchChange = useCallback(debounce((v: string) => setPerformanceSearch(v), 300), []);
 
-  const routeCount = Object.keys(routeMap).length;
-
   return (
     <div className="max-w-[1400px] mx-auto p-4 md:p-8 space-y-4 md:space-y-8 text-[#374151]">
+      
+      {/* Modal de Confirmação Global */}
+      <ConfirmModal 
+        show={confirmModal.show}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        isDanger={confirmModal.isDanger}
+        onConfirm={handleModalConfirm}
+        onCancel={() => setConfirmModal({...confirmModal, show: false})}
+      />
+
       {/* Modal de Senha */}
       {showPassModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
@@ -637,7 +704,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Outros Modais (Tickets, Vínculos, etc) */}
       {showImportModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
           <div className="bg-white rounded-3xl p-6 md:p-8 max-md w-full shadow-2xl scale-in-center">
@@ -646,7 +712,7 @@ const App: React.FC = () => {
             <div className="bg-blue-50 p-4 rounded-xl mt-4 border border-blue-100">
               <p className="text-blue-800 font-bold text-xs md:text-sm">Tickets únicos encontrados: {tempTickets.length}</p>
               {duplicateCount > 0 && (
-                <p className="text-amber-600 font-black text-[9px] md:text-[10px] uppercase mt-1">⚠️ {duplicateCount} Tickets duplicados foram ignorados.</p>
+                <p className="text-amber-600 font-black text-[9px] md:text-[10px] uppercase mt-1">⚠️ {duplicateCount} Tickets duplicados (SPXTN repetido) foram ignorados.</p>
               )}
             </div>
             <p className="text-gray-500 text-xs md:text-sm text-center mt-6">Informe a data de referência:</p>
@@ -730,20 +796,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {showDeleteModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-full shadow-2xl scale-in-center text-center">
-            <div className="text-4xl mb-4">🗑️</div>
-            <h2 className="text-xl font-black text-gray-800 uppercase">Apagar Tudo?</h2>
-            <p className="text-gray-500 text-xs md:text-sm mt-3">Remover rotas permanentemente da nuvem.</p>
-            <div className="flex flex-col gap-3 mt-8">
-              <button onClick={confirmClearDatabase} disabled={isDeleting} className="w-full py-4 bg-red-600 text-white rounded-2xl font-black text-xs uppercase transition-all">{isDeleting ? 'APAGANDO...' : 'Apagar Agora'}</button>
-              <button onClick={() => setShowDeleteModal(false)} className="w-full py-4 bg-gray-100 text-gray-600 rounded-2xl font-black text-xs uppercase">Cancelar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 md:gap-6 bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
         <div className="space-y-1">
           <h1 className="text-xl md:text-3xl font-extrabold text-[#1e3a8a] flex items-center gap-2">
@@ -762,39 +814,43 @@ const App: React.FC = () => {
         
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 md:gap-4">
           <button 
-            onClick={() => withAdmin(handleResetEverything)}
+            onClick={() => triggerConfirm('refresh_ceps', 'Atualizar Cidades?', 'O sistema irá re-validar todos os CEPs mapeados na API pública para normalizar nomes e distritos.', false)}
+            className="flex items-center justify-center gap-1.5 px-3 py-2 md:px-4 md:py-2.5 rounded-xl font-black text-[9px] md:text-xs border bg-white text-gray-700 border-gray-200 transition-all hover:bg-gray-50 active:scale-95"
+          >
+            📍 ATUALIZAR CEPS
+          </button>
+
+          <button 
+            onClick={() => withAdmin(() => triggerConfirm('reset_everything', '⚠️ RESET TOTAL?', 'Isso apagará DEFINITIVAMENTE todos os dados do banco de dados na nuvem. Ação irreversível.', true))}
             className={`flex items-center justify-center gap-1.5 px-3 py-2 md:px-4 md:py-2.5 rounded-xl font-black text-[9px] md:text-xs border transition-all active:scale-95 ${isAdmin ? 'bg-red-600 text-white border-red-700 shadow-lg shadow-red-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
           >
             {isAdmin ? '🔥' : '🔒'} RESET TOTAL
           </button>
           
-          <button onClick={() => withAdmin(clearAllTickets)} className={`flex items-center justify-center gap-1.5 px-3 py-2 md:px-4 md:py-2.5 rounded-xl font-black text-[9px] md:text-xs border transition-all ${isAdmin ? 'bg-red-50 text-red-600 border-red-100' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
+          <button onClick={() => withAdmin(() => triggerConfirm('clear_tickets', 'Limpar Tickets?', 'Isso removerá apenas os tickets do dashboard e nuvem.', true))} className={`flex items-center justify-center gap-1.5 px-3 py-2 md:px-4 md:py-2.5 rounded-xl font-black text-[9px] md:text-xs border transition-all active:scale-95 ${isAdmin ? 'bg-red-50 text-red-600 border-red-100' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
             {isAdmin ? '🗑️' : '🔒'} Limpar
           </button>
           
-          <button onClick={() => withAdmin(() => setShowDriverMgmtModal(true))} className="bg-gray-100 text-[#1e3a8a] px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-black flex items-center justify-center gap-1.5 text-[9px] md:text-xs border border-gray-200">
+          <button onClick={() => withAdmin(() => setShowDriverMgmtModal(true))} className="bg-gray-100 text-[#1e3a8a] px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-black flex items-center justify-center gap-1.5 text-[9px] md:text-xs border border-gray-200 active:scale-95 transition-all">
             {isAdmin ? '👤' : '🔒'} Vínculos
           </button>
           
-          <button onClick={() => withAdmin(() => document.getElementById('import-tickets-input')?.click())} className="bg-[#3b82f6] text-white px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 text-[9px] md:text-xs shadow-md">
+          <button onClick={() => withAdmin(() => document.getElementById('import-tickets-input')?.click())} className="bg-[#3b82f6] text-white px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 text-[9px] md:text-xs shadow-md active:scale-95 transition-all">
             {isAdmin ? '📥' : '🔒'} Importar
           </button>
           <input id="import-tickets-input" type="file" className="hidden" accept=".csv, .xlsx, .xls" onChange={handleFileUpload} />
           
           <div className="flex gap-0.5 col-span-2 sm:col-auto">
-            <button onClick={() => withAdmin(() => document.getElementById('import-routes-input')?.click())} className="flex-1 bg-emerald-600 text-white px-4 py-2 md:px-5 md:py-2.5 rounded-l-xl font-bold flex items-center justify-center gap-1.5 text-[9px] md:text-xs shadow-md border-r border-emerald-500/30">
+            <button onClick={() => withAdmin(() => document.getElementById('import-routes-input')?.click())} className="flex-1 bg-emerald-600 text-white px-4 py-2 md:px-5 md:py-2.5 rounded-l-xl font-bold flex items-center justify-center gap-1.5 text-[9px] md:text-xs shadow-md border-r border-emerald-500/30 active:scale-95 transition-all">
               {isAdmin ? '🗺️' : '🔒'} Rotas
             </button>
             <input id="import-routes-input" type="file" className="hidden" accept=".csv, .xlsx, .xls" onChange={handleRouteFileUpload} />
-            {routeCount > 0 && (
-              <button onClick={() => withAdmin(() => setShowDeleteModal(true))} className="bg-red-500 text-white px-3 py-2 md:px-3 md:py-2.5 rounded-r-xl font-bold text-[9px] md:text-xs shadow-md transition-all">
+            {Object.keys(routeMap).length > 0 && (
+              <button onClick={() => withAdmin(() => triggerConfirm('delete_routes', 'Apagar Rotas?', 'Isso removerá todos os mapeamentos SPXTN-CEP.', true))} className="bg-red-500 text-white px-3 py-2 md:px-3 md:py-2.5 rounded-r-xl font-bold text-[9px] md:text-xs shadow-md transition-all active:scale-95">
                 {isAdmin ? '🗑️' : '🔒'}
               </button>
             )}
           </div>
-          {isAdmin && (
-            <button onClick={() => { setIsAdmin(false); sessionStorage.removeItem('ihs_admin'); }} className="hidden lg:block p-2 text-gray-400 hover:text-red-500" title="Logout Admin">🔓</button>
-          )}
         </div>
       </header>
 
@@ -823,7 +879,7 @@ const App: React.FC = () => {
           </div>
           <button 
             onClick={() => {setSelectedRouteFilter('All'); setSelectedStatus('All'); setSearchTerm('');}} 
-            className="w-full sm:w-auto px-6 py-2.5 md:py-3 bg-[#3b82f6] text-white rounded-xl text-[10px] md:text-xs font-black shadow-md shrink-0 sm:mt-4"
+            className="w-full sm:w-auto px-6 py-2.5 md:py-3 bg-[#3b82f6] text-white rounded-xl text-[10px] md:text-xs font-black shadow-md shrink-0 sm:mt-4 active:scale-95 transition-all"
           >
             Limpar Filtros
           </button>
@@ -924,7 +980,7 @@ const App: React.FC = () => {
                             </button>
                           )}
                         </td>
-                        <td className="px-4 py-4 md:px-6 md:py-5 text-center font-black text-[10px] md:text-xs" title={`${stat.faturados} tickets faturados`}>
+                        <td className="px-4 py-4 md:px-6 md:py-5 text-center font-black text-[10px] md:text-xs">
                           {((stat.revertidos/(stat.totalTickets || 1))*100).toFixed(1)}%
                         </td>
                         <td className="px-4 py-4 md:px-6 md:py-5 text-center font-bold text-gray-700 text-[10px] md:text-xs">{stat.totalTickets}</td>
@@ -964,7 +1020,7 @@ const StatCard = ({ label, value, icon, color, isValue }: any) => {
 const InsightList = ({ title, icon, type, children }: any) => (
   <div className={`bg-white rounded-2xl shadow-sm border-t-4 ${type === 'best' ? 'border-emerald-500' : 'border-red-500'} overflow-hidden`}>
     <div className="px-3 py-2 md:px-4 md:py-3 bg-gray-50 border-b border-gray-100">
-      <h4 className="text-[8px] md:text :[10px] font-black uppercase text-gray-500 truncate">{icon} {title}</h4>
+      <h4 className="text-[8px] md:text-[10px] font-black uppercase text-gray-500 truncate">{icon} {title}</h4>
     </div>
     <div className="p-2 md:p-3 space-y-2">{children}</div>
   </div>
