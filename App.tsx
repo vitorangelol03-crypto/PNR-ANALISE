@@ -151,7 +151,21 @@ const App: React.FC = () => {
       const response = await fetch(`https://brasilapi.com.br/api/cep/v1/${cleanCep}`);
       if (response.ok) {
         const data = await response.json();
-        const info = `${data.city}, ${data.state}`;
+        
+        // Lógica para identificar distritos:
+        // Se houver bairro (neighborhood) e ele for diferente de "Centro", 
+        // incluímos no nome para identificar o distrito.
+        let info = '';
+        const neighborhood = data.neighborhood?.trim();
+        const city = data.city?.trim();
+        const state = data.state?.trim();
+
+        if (neighborhood && neighborhood.toLowerCase() !== 'centro' && neighborhood !== city) {
+          info = `${neighborhood} - ${city}, ${state}`;
+        } else {
+          info = `${city}, ${state}`;
+        }
+
         await supabase.from('city_cache').upsert({ cep: cleanCep, city_info: info });
         return info;
       }
@@ -179,6 +193,7 @@ const App: React.FC = () => {
               newCache[clean] = info;
               hasNewData = true;
             }
+            // Pequeno delay para evitar rate limit da API
             await new Promise(r => setTimeout(r, 200));
           }
         }
