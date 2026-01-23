@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -152,9 +151,6 @@ const App: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         
-        // Lógica para identificar distritos:
-        // Se houver bairro (neighborhood) e ele for diferente de "Centro", 
-        // incluímos no nome para identificar o distrito.
         let info = '';
         const neighborhood = data.neighborhood?.trim();
         const city = data.city?.trim();
@@ -193,7 +189,6 @@ const App: React.FC = () => {
               newCache[clean] = info;
               hasNewData = true;
             }
-            // Pequeno delay para evitar rate limit da API
             await new Promise(r => setTimeout(r, 200));
           }
         }
@@ -205,11 +200,34 @@ const App: React.FC = () => {
     if (Object.keys(routeMap).length > 0) enrichCeps();
   }, [routeMap]);
 
+  const handleRefreshCeps = async () => {
+    if (!confirm("Isso irá forçar o sistema a pesquisar todos os CEPs novamente na API para atualizar distritos e nomes. Deseja continuar?")) return;
+    
+    setIsFetchingCities(true);
+    try {
+      const cepsToRefresh = Array.from(new Set(Object.values(routeMap))).map(c => c.replace(/\D/g, ''));
+      
+      if (cepsToRefresh.length > 0) {
+        await supabase.from('city_cache').delete().in('cep', cepsToRefresh);
+        setCityCache({});
+        alert("Cache limpo! O sistema começará a re-mapear os CEPs automaticamente.");
+      } else {
+        alert("Nenhum CEP mapeado para atualizar.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao atualizar CEPs.");
+    } finally {
+      setIsFetchingCities(false);
+    }
+  };
+
   const saveDriverOverride = async (driverName: string, updates: Partial<DriverOverride>) => {
     try {
       const current = driverOverrides[driverName] || { route: "", isExcluded: false };
       const merged = { ...current, ...updates };
 
+      // Fix: Use merged.isExcluded instead of merged.is_excluded to match DriverOverride interface
       if (merged.route === "" && !merged.isExcluded) {
         await supabase.from('driver_overrides').delete().eq('driver_name', driverName);
         const newOverrides = { ...driverOverrides };
@@ -219,6 +237,7 @@ const App: React.FC = () => {
         await supabase.from('driver_overrides').upsert({ 
           driver_name: driverName, 
           overridden_route: merged.route, 
+          // Fix: Use merged.isExcluded instead of merged.is_excluded to match DriverOverride interface
           is_excluded: merged.isExcluded 
         });
         setDriverOverrides(prev => ({ ...prev, [driverName]: merged }));
@@ -248,7 +267,6 @@ const App: React.FC = () => {
     
     setIsDeleting(true);
     try {
-      // Deletar de todas as tabelas
       await Promise.all([
         supabase.from('tickets').delete().neq('ticket_id', '0_ignore_internal'),
         supabase.from('route_mapping').delete().neq('spxtn', '0_ignore_internal'),
@@ -257,7 +275,6 @@ const App: React.FC = () => {
         supabase.from('dashboard_meta').delete().neq('key', '0_ignore_internal')
       ]);
       
-      // Limpar estado local
       setAllData([]);
       setRouteMap({});
       setCityCache({});
@@ -265,7 +282,7 @@ const App: React.FC = () => {
       setReferenceDate('');
       
       alert("Sistema e Banco de Dados resetados com sucesso!");
-      location.reload(); // Recarregar para garantir estado limpo
+      location.reload();
     } catch (err) {
       console.error(err);
       alert("Erro ao resetar o sistema.");
@@ -318,7 +335,7 @@ const App: React.FC = () => {
         processed.push({
           ticketId,
           taskId: String(row[1] || ''),
-          spxtn: String(row[2] || '').trim(),
+          spxtn,
           driver: String(row[3] || 'Desconhecido').replace(/\d+/g, '').replace(/[\[\]]/g, '').replace(/\s+/g, ' ').trim(),
           station: String(row[4] || ''),
           slaDeadline: String(row[5] || ''),
@@ -440,10 +457,8 @@ const App: React.FC = () => {
     const dMap: Record<string, DriverStats> = {};
     const rMap: Record<string, RouteStats> = {};
     
-    // Filtro inicial de ativos (apenas quem não está oculto)
     const activeData = allData.filter(item => !driverOverrides[item.driver]?.isExcluded);
 
-    // --- Lógica de Mapeamento de Rota Mestra por Motorista ---
     const driverRouteCounts: Record<string, Record<string, number>> = {};
 
     activeData.forEach(item => {
@@ -534,12 +549,16 @@ const App: React.FC = () => {
     };
   }, [allData, routeMap, cityCache, searchTerm, selectedStatus, selectedRouteFilter, driverOverrides]);
 
-  const totals = useMemo(() => ({
-    total: stats.filtered.length,
-    faturados: stats.filtered.filter(i => i.status === TicketStatus.ForBilling).length,
-    revertidos: stats.filtered.filter(i => i.status === TicketStatus.Reversed).length,
-    value: stats.filtered.reduce((acc, curr) => acc + curr.pnrValue, 0)
-  }), [stats.filtered]);
+  const totals = useMemo(() => {
+    const faturadosItems = stats.filtered.filter(i => i.status === TicketStatus.ForBilling);
+    return {
+      total: stats.filtered.length,
+      faturados: faturadosItems.length,
+      revertidos: stats.filtered.filter(i => i.status === TicketStatus.Reversed).length,
+      value: stats.filtered.reduce((acc, curr) => acc + curr.pnrValue, 0),
+      faturadosValue: faturadosItems.reduce((acc, curr) => acc + curr.pnrValue, 0)
+    };
+  }, [stats.filtered]);
 
   const insights = useMemo(() => {
     const relevantDrivers = stats.drivers.filter(d => d.totalTickets > 10);
@@ -819,10 +838,11 @@ const App: React.FC = () => {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-6">
             <StatCard label={`Tickets`} value={totals.total} icon="📊" color="blue" />
             <StatCard label="Faturados" value={totals.faturados} icon="🛑" color="red" />
             <StatCard label="Revertidos" value={totals.revertidos} icon="✅" color="green" />
+            <StatCard label="Soma Faturados" value={formatCurrency(totals.faturadosValue)} icon="💸" color="red" isValue />
             <StatCard label="PNR Geral" value={formatCurrency(totals.value)} icon="💰" color="amber" isValue />
           </div>
 
@@ -944,7 +964,7 @@ const StatCard = ({ label, value, icon, color, isValue }: any) => {
 const InsightList = ({ title, icon, type, children }: any) => (
   <div className={`bg-white rounded-2xl shadow-sm border-t-4 ${type === 'best' ? 'border-emerald-500' : 'border-red-500'} overflow-hidden`}>
     <div className="px-3 py-2 md:px-4 md:py-3 bg-gray-50 border-b border-gray-100">
-      <h4 className="text-[8px] md:text-[10px] font-black uppercase text-gray-500 truncate">{icon} {title}</h4>
+      <h4 className="text-[8px] md:text :[10px] font-black uppercase text-gray-500 truncate">{icon} {title}</h4>
     </div>
     <div className="p-2 md:p-3 space-y-2">{children}</div>
   </div>
