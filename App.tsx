@@ -8,11 +8,16 @@ import { formatCurrency, formatDate, translateStatus, debounce } from './utils';
 
 type SortKey = 'performance' | 'totalTickets' | 'totalValue' | 'revertidos' | 'faturadosValue' | 'name';
 
+interface DriverOverride {
+  route: string;
+  isExcluded: boolean;
+}
+
 const App: React.FC = () => {
   const [allData, setAllData] = useState<IHSTicket[]>([]);
   const [routeMap, setRouteMap] = useState<Record<string, string>>({});
   const [cityCache, setCityCache] = useState<Record<string, string>>({});
-  const [driverOverrides, setDriverOverrides] = useState<Record<string, string>>({});
+  const [driverOverrides, setDriverOverrides] = useState<Record<string, DriverOverride>>({});
   const [referenceDate, setReferenceDate] = useState<string>('');
 
   // Segurança
@@ -50,7 +55,7 @@ const App: React.FC = () => {
       try {
         const { data: mappingData } = await supabase.from('route_mapping').select('spxtn, cep');
         const { data: cacheData } = await supabase.from('city_cache').select('cep, city_info');
-        const { data: overrideData } = await supabase.from('driver_overrides').select('driver_name, overridden_route');
+        const { data: overrideData } = await supabase.from('driver_overrides').select('driver_name, overridden_route, is_excluded');
         const { data: metaData } = await supabase.from('dashboard_meta').select('key, value');
         
         const refDate = metaData?.find(m => m.key === 'reference_date')?.value;
@@ -71,8 +76,13 @@ const App: React.FC = () => {
         }
 
         if (overrideData) {
-          const o: Record<string, string> = {};
-          overrideData.forEach(row => o[row.driver_name] = row.overridden_route);
+          const o: Record<string, DriverOverride> = {};
+          overrideData.forEach(row => {
+            o[row.driver_name] = { 
+              route: row.overridden_route || "", 
+              isExcluded: !!row.is_excluded 
+            };
+          });
           setDriverOverrides(o);
         }
 
@@ -86,6 +96,7 @@ const App: React.FC = () => {
             slaDeadline: t.sla_deadline,
             assignee: t.assignee,
             pnrValue: t.pnr_value,
+            // Fix: Map rejection_reason from Supabase to camelCase property
             rejectionReason: t.rejection_reason,
             createdTime: t.created_time,
             status: t.status as TicketStatus
@@ -174,58 +185,23 @@ const App: React.FC = () => {
     if (Object.keys(routeMap).length > 0) enrichCeps();
   }, [routeMap]);
 
-  const handleRouteFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    const extension = file.name.split('.').pop()?.toLowerCase();
-    
-    const processMap = async (rows: any[][]) => {
-      const payload: { spxtn: string, cep: string }[] = [];
-      const newMapping: Record<string, string> = { ...routeMap };
-
-      rows.forEach(row => {
-        const spxtn = String(row[0] || '').trim();
-        const cep = String(row[1] || '').trim().replace(/\D/g, '');
-        if (spxtn && cep) {
-          payload.push({ spxtn, cep });
-          newMapping[spxtn] = cep;
-        }
-      });
-
-      if (payload.length > 0) {
-        const { error } = await supabase.from('route_mapping').upsert(payload);
-        if (error) {
-          alert("Erro ao salvar no banco de dados.");
-          console.error(error);
-        } else {
-          setRouteMap(newMapping);
-          alert(`Sucesso! ${payload.length} novas rotas salvas no Supabase.`);
-        }
-      }
-    };
-
-    if (extension === 'csv') {
-      Papa.parse(file, { complete: (res) => processMap(res.data as any[][]), header: false, skipEmptyLines: true });
-    } else {
-      reader.onload = (e) => {
-        const wb = XLSX.read(e.target?.result, { type: 'binary' });
-        processMap(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 }) as any[][]);
-      };
-      reader.readAsBinaryString(file);
-    }
-  };
-
-  const saveDriverOverride = async (driverName: string, routeName: string) => {
+  const saveDriverOverride = async (driverName: string, updates: Partial<DriverOverride>) => {
     try {
-      if (routeName === "") {
+      const current = driverOverrides[driverName] || { route: "", isExcluded: false };
+      const merged = { ...current, ...updates };
+
+      if (merged.route === "" && !merged.isExcluded) {
         await supabase.from('driver_overrides').delete().eq('driver_name', driverName);
         const newOverrides = { ...driverOverrides };
         delete newOverrides[driverName];
         setDriverOverrides(newOverrides);
       } else {
-        await supabase.from('driver_overrides').upsert({ driver_name: driverName, overridden_route: routeName });
-        setDriverOverrides(prev => ({ ...prev, [driverName]: routeName }));
+        await supabase.from('driver_overrides').upsert({ 
+          driver_name: driverName, 
+          overridden_route: merged.route, 
+          is_excluded: merged.isExcluded 
+        });
+        setDriverOverrides(prev => ({ ...prev, [driverName]: merged }));
       }
     } catch (err) {
       console.error(err);
@@ -302,6 +278,56 @@ const App: React.FC = () => {
     }
   };
 
+  // Fix: Implemented missing handleRouteFileUpload for route mapping synchronization
+  const handleRouteFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    const extension = file.name.split('.').pop()?.toLowerCase();
+
+    const parseRows = async (rows: any[][]) => {
+      setIsProcessingFile(true);
+      try {
+        const dataRows = rows.filter(r => r.length >= 2);
+        const newMapping: Record<string, string> = {};
+        const upsertData: { spxtn: string, cep: string }[] = [];
+
+        dataRows.forEach(row => {
+          const spxtn = String(row[0] || '').trim();
+          const cep = String(row[1] || '').trim().replace(/\D/g, '');
+          if (spxtn && cep) {
+            newMapping[spxtn] = cep;
+            upsertData.push({ spxtn, cep });
+          }
+        });
+
+        if (upsertData.length > 0) {
+          const { error } = await supabase.from('route_mapping').upsert(upsertData, { onConflict: 'spxtn' });
+          if (error) throw error;
+          
+          setRouteMap(prev => ({ ...prev, ...newMapping }));
+          alert("Mapeamento de rotas atualizado com sucesso!");
+        }
+      } catch (err) {
+        console.error("Erro ao importar rotas:", err);
+        alert("Erro ao importar rotas.");
+      } finally {
+        setIsProcessingFile(false);
+        if (event.target) event.target.value = "";
+      }
+    };
+
+    if (extension === 'csv') {
+      Papa.parse(file, { complete: (res) => parseRows(res.data as any[][]), header: false, skipEmptyLines: true });
+    } else {
+      reader.onload = (e) => {
+        const wb = XLSX.read(e.target?.result, { type: 'binary' });
+        parseRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 }) as any[][]);
+      };
+      reader.readAsBinaryString(file);
+    }
+  };
+
   const confirmImport = async () => {
     if (!inputRefDate) {
       alert("Por favor, informe a data de referência.");
@@ -346,14 +372,17 @@ const App: React.FC = () => {
     const dMap: Record<string, DriverStats> = {};
     const rMap: Record<string, RouteStats> = {};
     
-    const filteredBySearch = allData.filter(item => {
+    // Filtrar motoristas excluídos da contagem
+    const activeData = allData.filter(item => !driverOverrides[item.driver]?.isExcluded);
+
+    const filteredBySearch = activeData.filter(item => {
       const matchSearch = item.driver.toLowerCase().includes(searchTerm.toLowerCase()) || item.ticketId.toLowerCase().includes(searchTerm.toLowerCase());
       const matchStatus = selectedStatus === 'All' || item.status === selectedStatus;
       return matchSearch && matchStatus;
     });
 
     filteredBySearch.forEach(item => {
-      const rawRoute = driverOverrides[item.driver] || (() => {
+      const rawRoute = driverOverrides[item.driver]?.route || (() => {
         const rawCep = routeMap[item.spxtn] || 'Não Mapeado';
         return cityCache[rawCep] || (rawCep === 'Não Mapeado' ? 'Não Mapeado' : `CEP ${rawCep}`);
       })();
@@ -369,7 +398,7 @@ const App: React.FC = () => {
 
     const finalFiltered = filteredBySearch.filter(item => {
       if (selectedRouteFilter === 'All') return true;
-      const currentRoute = driverOverrides[item.driver] || (() => {
+      const currentRoute = driverOverrides[item.driver]?.route || (() => {
         const rawCep = routeMap[item.spxtn] || 'Não Mapeado';
         return cityCache[rawCep] || (rawCep === 'Não Mapeado' ? 'Não Mapeado' : `CEP ${rawCep}`);
       })();
@@ -384,7 +413,7 @@ const App: React.FC = () => {
       d.totalTickets++;
       d.totalValue += item.pnrValue;
 
-      const currentRoute = driverOverrides[item.driver] || (() => {
+      const currentRoute = driverOverrides[item.driver]?.route || (() => {
         const rawCep = routeMap[item.spxtn] || 'Não Mapeado';
         return cityCache[rawCep] || (rawCep === 'Não Mapeado' ? 'Não Mapeado' : `CEP ${rawCep}`);
       })();
@@ -503,7 +532,7 @@ const App: React.FC = () => {
       {/* Outros Modais (Tickets, Vínculos, etc) */}
       {showImportModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-gray-100 scale-in-center">
+          <div className="bg-white rounded-3xl p-8 max-md w-full shadow-2xl border border-gray-100 scale-in-center">
             <div className="text-4xl mb-4 text-center">📅</div>
             <h2 className="text-xl font-black text-center text-gray-800 uppercase">Data de Referência</h2>
             <p className="text-gray-500 text-sm text-center mt-2">Informe a data que estes tickets representam.</p>
@@ -532,11 +561,11 @@ const App: React.FC = () => {
 
       {showDriverMgmtModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl border border-gray-100 flex flex-col h-[80vh]">
+          <div className="bg-white rounded-3xl p-8 max-w-3xl w-full shadow-2xl border border-gray-100 flex flex-col h-[85vh]">
             <div className="flex justify-between items-center mb-6">
               <div>
                 <h2 className="text-xl font-black text-gray-800 uppercase">Vínculos de Motoristas</h2>
-                <p className="text-xs text-gray-400 font-bold uppercase tracking-tighter">Ajuste manual de rotas fixas</p>
+                <p className="text-xs text-gray-400 font-bold uppercase tracking-tighter">Gerenciar Rotas e Visibilidade</p>
               </div>
               <button onClick={() => setShowDriverMgmtModal(false)} className="p-2 hover:bg-gray-100 rounded-full text-xl">✕</button>
             </div>
@@ -549,21 +578,42 @@ const App: React.FC = () => {
               />
             </div>
             <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-              {uniqueDriversFromData.map(name => (
-                <div key={name} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition-all">
-                  <span className="text-xs font-black uppercase text-gray-700 truncate max-w-[200px]">{name}</span>
-                  <select 
-                    value={driverOverrides[name] || ""} 
-                    onChange={(e) => saveDriverOverride(name, e.target.value)}
-                    className="text-[10px] font-bold py-1.5 px-3 bg-white border border-gray-200 rounded-lg outline-none cursor-pointer focus:border-blue-400"
-                  >
-                    <option value="">Detectar Automático</option>
-                    {routeList.filter(r => r !== 'Não Mapeado').map(route => (
-                      <option key={route} value={route}>{route}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
+              <div className="grid grid-cols-12 px-4 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                <div className="col-span-5">Motorista</div>
+                <div className="col-span-4">Rota Fixa</div>
+                <div className="col-span-3 text-center">Status</div>
+              </div>
+              {uniqueDriversFromData.map(name => {
+                const override = driverOverrides[name] || { route: "", isExcluded: false };
+                return (
+                  <div key={name} className={`grid grid-cols-12 items-center gap-4 p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition-all ${override.isExcluded ? 'opacity-60 bg-red-50/20' : ''}`}>
+                    <div className="col-span-5">
+                      <span className={`text-xs font-black uppercase truncate block ${override.isExcluded ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{name}</span>
+                    </div>
+                    <div className="col-span-4">
+                      <select 
+                        disabled={override.isExcluded}
+                        value={override.route} 
+                        onChange={(e) => saveDriverOverride(name, { route: e.target.value })}
+                        className="w-full text-[10px] font-bold py-1.5 px-3 bg-white border border-gray-200 rounded-lg outline-none cursor-pointer focus:border-blue-400 disabled:opacity-50 disabled:bg-gray-100"
+                      >
+                        <option value="">Auto Detect</option>
+                        {routeList.filter(r => r !== 'Não Mapeado').map(route => (
+                          <option key={route} value={route}>{route}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-span-3 flex justify-center">
+                      <button 
+                        onClick={() => saveDriverOverride(name, { isExcluded: !override.isExcluded })}
+                        className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all shadow-sm ${override.isExcluded ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}
+                      >
+                        {override.isExcluded ? 'Oculto' : 'Ativo'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             <div className="mt-6 pt-4 border-t border-gray-100 text-center">
               <button onClick={() => setShowDriverMgmtModal(false)} className="px-8 py-3 bg-[#1e3a8a] text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all">Concluir</button>
