@@ -6,7 +6,7 @@ import { supabase } from './supabase';
 import { TicketStatus, IHSTicket, DriverStats, RouteStats } from './types';
 import { formatCurrency, formatDate, translateStatus, debounce } from './utils';
 
-type SortKey = 'performance' | 'totalTickets' | 'totalValue' | 'revertidos' | 'faturadosValue' | 'name';
+type SortKey = 'performance' | 'totalTickets' | 'faturados' | 'totalValue' | 'revertidos' | 'faturadosValue' | 'name';
 
 interface DriverOverride {
   route: string;
@@ -219,14 +219,11 @@ const App: React.FC = () => {
           const isDistrict = CARATINGA_DISTRICTS.some(d => normalizedNeighborhood.includes(normalizeText(d)));
           
           if (isDistrict) {
-            // Se for distrito, mantém o nome do distrito para separar a rota
             info = `${neighborhood} - ${city}, ${state}`;
           } else {
-            // Se for bairro urbano ou centro, agrupa em "Caratinga, MG"
             info = `Caratinga, ${state}`; 
           }
         } else {
-          // Lógica padrão para outras cidades (Distritos costumam ter bairro preenchido)
           if (neighborhood && neighborhood.toLowerCase() !== 'centro' && neighborhood !== city) {
             info = `${neighborhood} - ${city}, ${state}`;
           } else {
@@ -261,7 +258,7 @@ const App: React.FC = () => {
               newCache[clean] = info;
               hasNewData = true;
             }
-            await new Promise(r => setTimeout(r, 250)); // Delay otimizado
+            await new Promise(r => setTimeout(r, 250)); 
           }
         }
         
@@ -291,15 +288,12 @@ const App: React.FC = () => {
     try {
       const cepsToRefresh = Array.from(new Set(Object.values(routeMap) as string[])).map((c: string) => c.replace(/\D/g, ''));
       if (cepsToRefresh.length > 0) {
-        // Limpa no Supabase e no estado local para forçar o enrichment
         await supabase.from('city_cache').delete().in('cep', cepsToRefresh);
         setCityCache({});
-        setRefreshKey(prev => prev + 1); // Dispara o useEffect
+        setRefreshKey(prev => prev + 1);
       }
     } catch (err) {
       console.error("Erro ao atualizar ceps:", err);
-    } finally {
-      // setIsFetchingCities(false) é tratado pelo useEffect de enriquecimento
     }
   };
 
@@ -394,7 +388,7 @@ const App: React.FC = () => {
 
       dataRows.forEach((row) => {
         const ticketIdRaw = String(row[0] || '').trim();
-        const spxtnCode = String(row[2] || '').trim(); // SPXTN está na Coluna C (índice 2)
+        const spxtnCode = String(row[2] || '').trim(); 
 
         if (!spxtnCode) return;
 
@@ -959,6 +953,7 @@ const App: React.FC = () => {
                       <th className="px-4 py-3 md:px-6 md:py-4 cursor-pointer" onClick={() => toggleSort('name')}>Motorista</th>
                       <th className="px-4 py-3 md:px-6 md:py-4 text-center cursor-pointer" onClick={() => toggleSort('performance')}>Taxa</th>
                       <th className="px-4 py-3 md:px-6 md:py-4 text-center cursor-pointer" onClick={() => toggleSort('totalTickets')}>Tks</th>
+                      <th className="px-4 py-3 md:px-6 md:py-4 text-center cursor-pointer" onClick={() => toggleSort('faturados')}>Fat</th>
                       <th className="px-4 py-3 md:px-6 md:py-4 text-right cursor-pointer" onClick={() => toggleSort('totalValue')}>PNR</th>
                       <th className="px-4 py-3 md:px-6 md:py-4 text-right text-red-600 cursor-pointer" onClick={() => toggleSort('faturadosValue')}>Faturado</th>
                     </tr>
@@ -984,6 +979,7 @@ const App: React.FC = () => {
                           {((stat.revertidos/(stat.totalTickets || 1))*100).toFixed(1)}%
                         </td>
                         <td className="px-4 py-4 md:px-6 md:py-5 text-center font-bold text-gray-700 text-[10px] md:text-xs">{stat.totalTickets}</td>
+                        <td className="px-4 py-4 md:px-6 md:py-5 text-center font-bold text-red-500 text-[10px] md:text-xs">{stat.faturados}</td>
                         <td className="px-4 py-4 md:px-6 md:py-5 text-right font-semibold text-gray-600 text-[10px] md:text-xs">{formatCurrency(stat.totalValue)}</td>
                         <td className="px-4 py-4 md:px-6 md:py-5 text-right text-red-600 font-black text-[10px] md:text-xs">{formatCurrency(stat.faturadosValue)}</td>
                       </tr>
