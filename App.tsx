@@ -35,6 +35,7 @@ const App: React.FC = () => {
   const [showImportModal, setShowImportModal] = useState(false);
   
   const [tempTickets, setTempTickets] = useState<IHSTicket[]>([]);
+  const [duplicateCount, setDuplicateCount] = useState<number>(0);
   const [inputRefDate, setInputRefDate] = useState<string>('');
 
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -96,7 +97,6 @@ const App: React.FC = () => {
             slaDeadline: t.sla_deadline,
             assignee: t.assignee,
             pnrValue: t.pnr_value,
-            // Fix: Map rejection_reason from Supabase to camelCase property
             rejectionReason: t.rejection_reason,
             createdTime: t.created_time,
             status: t.status as TicketStatus
@@ -249,19 +249,37 @@ const App: React.FC = () => {
     
     const parseRows = (rows: any[][]) => {
       const dataRows = (rows[0]?.[0]?.toString().toLowerCase().includes('id')) ? rows.slice(1) : rows;
-      const processed: IHSTicket[] = dataRows.map((row) => ({
-        ticketId: String(row[0] || ''),
-        taskId: String(row[1] || ''),
-        spxtn: String(row[2] || '').trim(),
-        driver: String(row[3] || 'Desconhecido').replace(/\d+/g, '').replace(/[\[\]]/g, '').replace(/\s+/g, ' ').trim(),
-        station: String(row[4] || ''),
-        slaDeadline: String(row[5] || ''),
-        assignee: String(row[6] || ''),
-        pnrValue: parseFloat(String(row[7] || '0').replace(',', '.').replace('R$', '').trim()) || 0,
-        rejectionReason: String(row[8] || ''),
-        createdTime: String(row[9] || ''),
-        status: String(row[10]).toLowerCase().includes('billing') ? TicketStatus.ForBilling : TicketStatus.Reversed,
-      }));
+      
+      const seenIds = new Set<string>();
+      let dups = 0;
+      const processed: IHSTicket[] = [];
+
+      dataRows.forEach((row) => {
+        const ticketId = String(row[0] || '').trim();
+        if (!ticketId) return;
+
+        if (seenIds.has(ticketId)) {
+          dups++;
+          return;
+        }
+
+        seenIds.add(ticketId);
+        processed.push({
+          ticketId,
+          taskId: String(row[1] || ''),
+          spxtn: String(row[2] || '').trim(),
+          driver: String(row[3] || 'Desconhecido').replace(/\d+/g, '').replace(/[\[\]]/g, '').replace(/\s+/g, ' ').trim(),
+          station: String(row[4] || ''),
+          slaDeadline: String(row[5] || ''),
+          assignee: String(row[6] || ''),
+          pnrValue: parseFloat(String(row[7] || '0').replace(',', '.').replace('R$', '').trim()) || 0,
+          rejectionReason: String(row[8] || ''),
+          createdTime: String(row[9] || ''),
+          status: String(row[10]).toLowerCase().includes('billing') ? TicketStatus.ForBilling : TicketStatus.Reversed,
+        });
+      });
+
+      setDuplicateCount(dups);
       setTempTickets(processed);
       setShowImportModal(true);
       event.target.value = ""; 
@@ -278,7 +296,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Fix: Implemented missing handleRouteFileUpload for route mapping synchronization
   const handleRouteFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -372,7 +389,6 @@ const App: React.FC = () => {
     const dMap: Record<string, DriverStats> = {};
     const rMap: Record<string, RouteStats> = {};
     
-    // Filtrar motoristas excluídos da contagem
     const activeData = allData.filter(item => !driverOverrides[item.driver]?.isExcluded);
 
     const filteredBySearch = activeData.filter(item => {
@@ -534,9 +550,15 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
           <div className="bg-white rounded-3xl p-8 max-md w-full shadow-2xl border border-gray-100 scale-in-center">
             <div className="text-4xl mb-4 text-center">📅</div>
-            <h2 className="text-xl font-black text-center text-gray-800 uppercase">Data de Referência</h2>
-            <p className="text-gray-500 text-sm text-center mt-2">Informe a data que estes tickets representam.</p>
-            <div className="mt-6 space-y-4">
+            <h2 className="text-xl font-black text-center text-gray-800 uppercase">Confirmar Importação</h2>
+            <div className="bg-blue-50 p-4 rounded-xl mt-4 border border-blue-100">
+              <p className="text-blue-800 font-bold text-sm">Tickets únicos encontrados: {tempTickets.length}</p>
+              {duplicateCount > 0 && (
+                <p className="text-amber-600 font-black text-[10px] uppercase mt-1">⚠️ {duplicateCount} Tickets duplicados foram ignorados.</p>
+              )}
+            </div>
+            <p className="text-gray-500 text-sm text-center mt-6">Informe a data que estes tickets representam:</p>
+            <div className="mt-4 space-y-4">
               <input 
                 type="text" 
                 placeholder="Ex: 22/10/2023" 
