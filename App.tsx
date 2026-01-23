@@ -394,38 +394,89 @@ const App: React.FC = () => {
     const dMap: Record<string, DriverStats> = {};
     const rMap: Record<string, RouteStats> = {};
     
+    // Filtro inicial de ativos (apenas quem não está oculto)
     const activeData = allData.filter(item => !driverOverrides[item.driver]?.isExcluded);
 
+    // --- Lógica de Mapeamento de Rota Mestra por Motorista ---
+    // Precisamos saber qual a rota de cada motorista para os tickets que não têm SPXTN mapeado
+    const driverRouteCounts: Record<string, Record<string, number>> = {};
+
+    activeData.forEach(item => {
+      let currentRoute = '';
+      
+      // 1. Prioridade absoluta: Override manual (Vínculo)
+      if (driverOverrides[item.driver]?.route) {
+        currentRoute = driverOverrides[item.driver].route;
+      } else {
+        // 2. Mapeamento via SPXTN -> CEP -> Cidade
+        const rawCep = routeMap[item.spxtn];
+        if (rawCep) {
+          currentRoute = cityCache[rawCep] || `CEP ${rawCep}`;
+        }
+      }
+
+      if (currentRoute) {
+        if (!driverRouteCounts[item.driver]) driverRouteCounts[item.driver] = {};
+        driverRouteCounts[item.driver][currentRoute] = (driverRouteCounts[item.driver][currentRoute] || 0) + 1;
+      }
+    });
+
+    // Determinar a rota predominante de cada motorista
+    const driverPreferredRoute: Record<string, string> = {};
+    Object.entries(driverRouteCounts).forEach(([driver, routes]) => {
+      const sortedRoutes = Object.entries(routes).sort((a, b) => b[1] - a[1]);
+      if (sortedRoutes.length > 0) {
+        driverPreferredRoute[driver] = sortedRoutes[0][0];
+      }
+    });
+
+    // Função para obter a rota final de um ticket com lógica de fallback
+    const getTicketFinalRoute = (item: IHSTicket) => {
+      // 1. Tentar override manual direto
+      if (driverOverrides[item.driver]?.route) return driverOverrides[item.driver].route;
+      
+      // 2. Tentar mapeamento SPXTN direto
+      const rawCep = routeMap[item.spxtn];
+      if (rawCep) {
+        const cityInfo = cityCache[rawCep];
+        if (cityInfo) return cityInfo;
+        return `CEP ${rawCep}`;
+      }
+
+      // 3. Fallback: Usar a rota predominante que esse motorista já teve em outros tickets
+      if (driverPreferredRoute[item.driver]) return driverPreferredRoute[item.driver];
+
+      return 'Não Mapeado';
+    };
+
+    // Filtro de busca (barra de pesquisa e status)
     const filteredBySearch = activeData.filter(item => {
-      const matchSearch = item.driver.toLowerCase().includes(searchTerm.toLowerCase()) || item.ticketId.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchSearch = item.driver.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          item.ticketId.toLowerCase().includes(searchTerm.toLowerCase());
       const matchStatus = selectedStatus === 'All' || item.status === selectedStatus;
       return matchSearch && matchStatus;
     });
 
+    // Processamento das Rotas (Monitoramento)
     filteredBySearch.forEach(item => {
-      const rawRoute = driverOverrides[item.driver]?.route || (() => {
-        const rawCep = routeMap[item.spxtn] || 'Não Mapeado';
-        return cityCache[rawCep] || (rawCep === 'Não Mapeado' ? 'Não Mapeado' : `CEP ${rawCep}`);
-      })();
-      
-      const city = rawRoute;
-      
-      if (!rMap[city]) rMap[city] = { cep: 'N/A', locationName: city, totalTickets: 0, faturados: 0, revertidos: 0, totalValue: 0, drivers: new Set() };
-      rMap[city].totalTickets++;
-      rMap[city].totalValue += item.pnrValue;
-      rMap[city].drivers.add(item.driver);
-      if (item.status === TicketStatus.ForBilling) rMap[city].faturados++; else rMap[city].revertidos++;
+      const route = getTicketFinalRoute(item);
+      if (!rMap[route]) {
+        rMap[route] = { cep: 'N/A', locationName: route, totalTickets: 0, faturados: 0, revertidos: 0, totalValue: 0, drivers: new Set() };
+      }
+      const r = rMap[route];
+      r.totalTickets++;
+      r.totalValue += item.pnrValue;
+      r.drivers.add(item.driver);
+      if (item.status === TicketStatus.ForBilling) r.faturados++; else r.revertidos++;
     });
 
+    // Filtro final do Dashboard (Seletor Global de Rota)
     const finalFiltered = filteredBySearch.filter(item => {
       if (selectedRouteFilter === 'All') return true;
-      const currentRoute = driverOverrides[item.driver]?.route || (() => {
-        const rawCep = routeMap[item.spxtn] || 'Não Mapeado';
-        return cityCache[rawCep] || (rawCep === 'Não Mapeado' ? 'Não Mapeado' : `CEP ${rawCep}`);
-      })();
-      return currentRoute === selectedRouteFilter;
+      return getTicketFinalRoute(item) === selectedRouteFilter;
     });
 
+    // Processamento dos Motoristas (Ranking)
     finalFiltered.forEach(item => {
       if (!dMap[item.driver]) {
         dMap[item.driver] = { name: item.driver, totalTickets: 0, totalValue: 0, faturados: 0, faturadosValue: 0, revertidos: 0, revertidosValue: 0, routes: [] };
@@ -434,10 +485,7 @@ const App: React.FC = () => {
       d.totalTickets++;
       d.totalValue += item.pnrValue;
 
-      const currentRoute = driverOverrides[item.driver]?.route || (() => {
-        const rawCep = routeMap[item.spxtn] || 'Não Mapeado';
-        return cityCache[rawCep] || (rawCep === 'Não Mapeado' ? 'Não Mapeado' : `CEP ${rawCep}`);
-      })();
+      const currentRoute = getTicketFinalRoute(item);
       if (!d.routes?.includes(currentRoute)) d.routes?.push(currentRoute);
 
       if (item.status === TicketStatus.ForBilling) {
