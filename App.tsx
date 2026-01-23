@@ -203,6 +203,7 @@ const App: React.FC = () => {
         await supabase.from('driver_overrides').upsert({ 
           driver_name: driverName, 
           overridden_route: merged.route, 
+          // Fix: Property 'is_excluded' should use 'merged.isExcluded' from the DriverOverride interface
           is_excluded: merged.isExcluded 
         });
         setDriverOverrides(prev => ({ ...prev, [driverName]: merged }));
@@ -545,37 +546,26 @@ const App: React.FC = () => {
   const routeCount = Object.keys(routeMap).length;
 
   return (
-    <div className="max-w-[1400px] mx-auto p-4 md:p-8 space-y-6 text-[#374151]">
+    <div className="max-w-[1400px] mx-auto p-4 md:p-8 space-y-4 md:space-y-8 text-[#374151]">
       {/* Modal de Senha */}
       {showPassModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="bg-white rounded-3xl p-10 max-w-sm w-full shadow-2xl border border-gray-100 scale-in-center">
-            <div className="text-5xl mb-6 text-center">🔒</div>
-            <h2 className="text-2xl font-black text-center text-gray-800 uppercase tracking-tight">Área Restrita</h2>
-            <p className="text-gray-400 text-sm text-center mt-2 font-medium">Digite a senha para desbloquear as funções de administrador.</p>
-            <form onSubmit={handleAuth} className="mt-8 space-y-4">
+          <div className="bg-white rounded-3xl p-6 md:p-10 max-w-sm w-full shadow-2xl scale-in-center">
+            <div className="text-4xl md:text-5xl mb-4 md:mb-6 text-center">🔒</div>
+            <h2 className="text-xl md:text-2xl font-black text-center text-gray-800 uppercase tracking-tight">Área Restrita</h2>
+            <p className="text-gray-400 text-xs md:text-sm text-center mt-2 font-medium">Digite a senha para administrador.</p>
+            <form onSubmit={handleAuth} className="mt-6 md:mt-8 space-y-4">
               <input 
                 autoFocus
                 type="password" 
                 placeholder="••••••" 
                 value={passInput}
                 onChange={(e) => setPassInput(e.target.value)}
-                className="w-full px-5 py-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-2xl font-black text-center outline-none focus:border-blue-500 transition-all tracking-[0.5em]"
+                className="w-full px-5 py-3 md:py-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-xl md:text-2xl font-black text-center outline-none focus:border-blue-500 transition-all tracking-[0.5em]"
               />
               <div className="flex gap-2">
-                <button 
-                  type="submit"
-                  className="flex-1 py-4 bg-[#1e3a8a] text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-200 active:scale-95 transition-all"
-                >
-                  Desbloquear
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => { setShowPassModal(false); setPendingAction(null); setPassInput(''); }}
-                  className="px-6 py-4 bg-gray-100 text-gray-500 rounded-2xl font-black text-xs uppercase transition-all"
-                >
-                  Sair
-                </button>
+                <button type="submit" className="flex-1 py-3 md:py-4 bg-[#1e3a8a] text-white rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest shadow-lg shadow-blue-200 active:scale-95 transition-all">Desbloquear</button>
+                <button type="button" onClick={() => { setShowPassModal(false); setPendingAction(null); setPassInput(''); }} className="px-4 md:px-6 py-3 md:py-4 bg-gray-100 text-gray-500 rounded-2xl font-black text-[10px] md:text-xs uppercase transition-all">Sair</button>
               </div>
             </form>
           </div>
@@ -585,33 +575,27 @@ const App: React.FC = () => {
       {/* Outros Modais (Tickets, Vínculos, etc) */}
       {showImportModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-          <div className="bg-white rounded-3xl p-8 max-md w-full shadow-2xl border border-gray-100 scale-in-center">
-            <div className="text-4xl mb-4 text-center">📅</div>
-            <h2 className="text-xl font-black text-center text-gray-800 uppercase">Confirmar Importação</h2>
+          <div className="bg-white rounded-3xl p-6 md:p-8 max-md w-full shadow-2xl scale-in-center">
+            <div className="text-3xl md:text-4xl mb-3 md:mb-4 text-center">📅</div>
+            <h2 className="text-lg md:text-xl font-black text-center text-gray-800 uppercase">Confirmar Importação</h2>
             <div className="bg-blue-50 p-4 rounded-xl mt-4 border border-blue-100">
-              <p className="text-blue-800 font-bold text-sm">Tickets únicos encontrados: {tempTickets.length}</p>
+              <p className="text-blue-800 font-bold text-xs md:text-sm">Tickets únicos encontrados: {tempTickets.length}</p>
               {duplicateCount > 0 && (
-                <p className="text-amber-600 font-black text-[10px] uppercase mt-1">⚠️ {duplicateCount} Tickets duplicados foram ignorados.</p>
+                <p className="text-amber-600 font-black text-[9px] md:text-[10px] uppercase mt-1">⚠️ {duplicateCount} Tickets duplicados foram ignorados.</p>
               )}
             </div>
-            <p className="text-gray-500 text-sm text-center mt-6">Informe a data que estes tickets representam:</p>
+            <p className="text-gray-500 text-xs md:text-sm text-center mt-6">Informe a data de referência:</p>
             <div className="mt-4 space-y-4">
               <input 
                 type="text" 
                 placeholder="Ex: 22/10/2023" 
                 value={inputRefDate}
                 onChange={(e) => setInputRefDate(e.target.value)}
-                className="w-full px-5 py-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-lg font-bold text-center outline-none focus:border-blue-400 focus:bg-white transition-all"
+                className="w-full px-5 py-3 md:py-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-base md:text-lg font-bold text-center outline-none focus:border-blue-400 focus:bg-white transition-all"
               />
               <div className="flex gap-3 mt-4">
-                <button 
-                  onClick={confirmImport}
-                  disabled={isProcessingFile}
-                  className="flex-1 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-200 disabled:opacity-50 transition-all"
-                >
-                  {isProcessingFile ? 'SALVANDO...' : 'Salvar e Iniciar'}
-                </button>
-                <button onClick={() => setShowImportModal(false)} className="px-6 py-4 bg-gray-100 text-gray-600 rounded-2xl font-black text-xs uppercase transition-all">Cancelar</button>
+                <button onClick={confirmImport} disabled={isProcessingFile} className="flex-1 py-3 md:py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest shadow-lg shadow-blue-200 disabled:opacity-50 transition-all">{isProcessingFile ? 'SALVANDO...' : 'Salvar'}</button>
+                <button onClick={() => setShowImportModal(false)} className="px-4 md:px-6 py-3 md:py-4 bg-gray-100 text-gray-600 rounded-2xl font-black text-[10px] md:text-xs uppercase transition-all">Sair</button>
               </div>
             </div>
           </div>
@@ -620,24 +604,24 @@ const App: React.FC = () => {
 
       {showDriverMgmtModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl p-8 max-w-3xl w-full shadow-2xl border border-gray-100 flex flex-col h-[85vh]">
+          <div className="bg-white rounded-3xl p-6 md:p-8 max-w-3xl w-full shadow-2xl flex flex-col h-[90vh]">
             <div className="flex justify-between items-center mb-6">
               <div>
-                <h2 className="text-xl font-black text-gray-800 uppercase">Vínculos de Motoristas</h2>
-                <p className="text-xs text-gray-400 font-bold uppercase tracking-tighter">Gerenciar Rotas e Visibilidade</p>
+                <h2 className="text-lg md:text-xl font-black text-gray-800 uppercase">Vínculos</h2>
+                <p className="text-[9px] md:text-xs text-gray-400 font-bold uppercase tracking-tighter">Gerenciar Rotas e Visibilidade</p>
               </div>
-              <button onClick={() => setShowDriverMgmtModal(false)} className="p-2 hover:bg-gray-100 rounded-full text-xl">✕</button>
+              <button onClick={() => setShowDriverMgmtModal(false)} className="p-2 hover:bg-gray-100 rounded-full text-lg">✕</button>
             </div>
             <div className="mb-4">
               <input 
                 type="text" 
                 placeholder="🔍 Buscar motorista..." 
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
+                className="w-full px-4 py-2 md:py-3 bg-gray-50 border border-gray-200 rounded-xl text-xs md:text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
                 onChange={(e) => setMgmtSearch(e.target.value)}
               />
             </div>
             <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-              <div className="grid grid-cols-12 px-4 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">
+              <div className="grid grid-cols-12 px-4 py-1 text-[8px] md:text-[10px] font-black text-gray-400 uppercase tracking-widest">
                 <div className="col-span-5">Motorista</div>
                 <div className="col-span-4">Rota Fixa</div>
                 <div className="col-span-3 text-center">Status</div>
@@ -645,16 +629,16 @@ const App: React.FC = () => {
               {uniqueDriversFromData.map(name => {
                 const override = driverOverrides[name] || { route: "", isExcluded: false };
                 return (
-                  <div key={name} className={`grid grid-cols-12 items-center gap-4 p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition-all ${override.isExcluded ? 'opacity-60 bg-red-50/20' : ''}`}>
+                  <div key={name} className={`grid grid-cols-12 items-center gap-2 md:gap-4 p-2 md:p-3 bg-gray-50 rounded-xl border border-gray-100 transition-all ${override.isExcluded ? 'opacity-50' : ''}`}>
                     <div className="col-span-5">
-                      <span className={`text-xs font-black uppercase truncate block ${override.isExcluded ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{name}</span>
+                      <span className={`text-[10px] md:text-xs font-black uppercase truncate block ${override.isExcluded ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{name}</span>
                     </div>
                     <div className="col-span-4">
                       <select 
                         disabled={override.isExcluded}
                         value={override.route} 
                         onChange={(e) => saveDriverOverride(name, { route: e.target.value })}
-                        className="w-full text-[10px] font-bold py-1.5 px-3 bg-white border border-gray-200 rounded-lg outline-none cursor-pointer focus:border-blue-400 disabled:opacity-50 disabled:bg-gray-100"
+                        className="w-full text-[8px] md:text-[10px] font-bold py-1 px-1 md:px-3 bg-white border border-gray-200 rounded-lg outline-none cursor-pointer"
                       >
                         <option value="">Auto Detect</option>
                         {routeList.filter(r => r !== 'Não Mapeado').map(route => (
@@ -665,17 +649,17 @@ const App: React.FC = () => {
                     <div className="col-span-3 flex justify-center">
                       <button 
                         onClick={() => saveDriverOverride(name, { isExcluded: !override.isExcluded })}
-                        className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all shadow-sm ${override.isExcluded ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}
+                        className={`px-2 md:px-3 py-1 md:py-1.5 rounded-lg text-[8px] md:text-[9px] font-black uppercase transition-all ${override.isExcluded ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white'}`}
                       >
-                        {override.isExcluded ? 'Oculto' : 'Ativo'}
+                        {override.isExcluded ? 'OFF' : 'ON'}
                       </button>
                     </div>
                   </div>
                 );
               })}
             </div>
-            <div className="mt-6 pt-4 border-t border-gray-100 text-center">
-              <button onClick={() => setShowDriverMgmtModal(false)} className="px-8 py-3 bg-[#1e3a8a] text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all">Concluir</button>
+            <div className="mt-4 pt-4 border-t border-gray-100 text-center">
+              <button onClick={() => setShowDriverMgmtModal(false)} className="w-full md:w-auto px-8 py-3 bg-[#1e3a8a] text-white rounded-xl font-black text-xs uppercase tracking-widest">Concluir</button>
             </div>
           </div>
         </div>
@@ -683,166 +667,146 @@ const App: React.FC = () => {
 
       {showDeleteModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-gray-100 scale-in-center">
-            <div className="text-4xl mb-4 text-center">🗑️</div>
-            <h2 className="text-xl font-black text-center text-gray-800 uppercase">Apagar Tudo?</h2>
-            <p className="text-gray-500 text-sm text-center mt-3">Remover rotas permanentemente da nuvem.</p>
+          <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-full shadow-2xl scale-in-center text-center">
+            <div className="text-4xl mb-4">🗑️</div>
+            <h2 className="text-xl font-black text-gray-800 uppercase">Apagar Tudo?</h2>
+            <p className="text-gray-500 text-xs md:text-sm mt-3">Remover rotas permanentemente da nuvem.</p>
             <div className="flex flex-col gap-3 mt-8">
-              <button onClick={confirmClearDatabase} disabled={isDeleting} className="w-full py-4 bg-red-600 text-white rounded-2xl font-black text-xs uppercase transition-all">{isDeleting ? 'APAGANDO...' : 'Apagar Definitivamente'}</button>
-              <button onClick={() => setShowDeleteModal(false)} className="w-full py-4 bg-gray-100 text-gray-600 rounded-2xl font-black text-xs uppercase transition-all">Cancelar</button>
+              <button onClick={confirmClearDatabase} disabled={isDeleting} className="w-full py-4 bg-red-600 text-white rounded-2xl font-black text-xs uppercase transition-all">{isDeleting ? 'APAGANDO...' : 'Apagar Agora'}</button>
+              <button onClick={() => setShowDeleteModal(false)} className="w-full py-4 bg-gray-100 text-gray-600 rounded-2xl font-black text-xs uppercase">Cancelar</button>
             </div>
           </div>
         </div>
       )}
 
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 md:gap-6 bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
         <div className="space-y-1">
-          <h1 className="text-3xl font-extrabold text-[#1e3a8a] flex items-center gap-2">
-            <span className="p-2 bg-blue-50 rounded-lg text-xl">🚀</span>
-            IHS Dashboard Elite
+          <h1 className="text-xl md:text-3xl font-extrabold text-[#1e3a8a] flex items-center gap-2">
+            <span className="p-1.5 bg-blue-50 rounded-lg text-lg md:text-xl">🚀</span>
+            IHS Dashboard
           </h1>
           <div className="flex flex-col gap-0.5">
-            <p className="text-gray-500 font-medium text-[10px] uppercase tracking-widest">Database Sync: Supabase Cloud</p>
             {referenceDate && (
-              <p className="text-blue-600 font-black text-xs flex items-center gap-1.5 uppercase">
-                <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+              <p className="text-blue-600 font-black text-[10px] md:text-xs flex items-center gap-1.5 uppercase">
+                <span className="w-1.5 h-1.5 md:w-2 md:h-2 bg-blue-500 rounded-full animate-pulse"></span>
                 Referência: {referenceDate}
               </p>
             )}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-4">
-          {allData.length > 0 && (
-            <button 
-              onClick={() => withAdmin(clearAllTickets)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-black text-xs border transition-all active:scale-95 ${isAdmin ? 'bg-red-50 text-red-600 border-red-100' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
-            >
-              {isAdmin ? '🗑️' : '🔒'} Limpar
-            </button>
-          )}
-          <button 
-            onClick={() => withAdmin(() => setShowDriverMgmtModal(true))}
-            className="bg-gray-100 hover:bg-gray-200 text-[#1e3a8a] px-5 py-2.5 rounded-xl font-black flex items-center gap-2 text-xs shadow-sm transition-all active:scale-95 border border-gray-200"
-          >
+        
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 md:gap-4">
+          <button onClick={() => withAdmin(clearAllTickets)} className={`flex items-center justify-center gap-1.5 px-3 py-2 md:px-4 md:py-2.5 rounded-xl font-black text-[9px] md:text-xs border transition-all ${isAdmin ? 'bg-red-50 text-red-600 border-red-100' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
+            {isAdmin ? '🗑️' : '🔒'} Limpar
+          </button>
+          <button onClick={() => withAdmin(() => setShowDriverMgmtModal(true))} className="bg-gray-100 text-[#1e3a8a] px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-black flex items-center justify-center gap-1.5 text-[9px] md:text-xs border border-gray-200">
             {isAdmin ? '👤' : '🔒'} Vínculos
           </button>
-          <button 
-            onClick={() => withAdmin(() => document.getElementById('import-tickets-input')?.click())}
-            className="bg-[#3b82f6] hover:bg-[#2563eb] text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 text-xs shadow-md transition-all active:scale-95"
-          >
+          <button onClick={() => withAdmin(() => document.getElementById('import-tickets-input')?.click())} className="bg-[#3b82f6] text-white px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 text-[9px] md:text-xs shadow-md">
             {isAdmin ? '📥' : '🔒'} Importar
           </button>
           <input id="import-tickets-input" type="file" className="hidden" accept=".csv, .xlsx, .xls" onChange={handleFileUpload} />
           
-          <div className="flex gap-1">
-            <button 
-              onClick={() => withAdmin(() => document.getElementById('import-routes-input')?.click())}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-l-xl font-bold flex items-center gap-2 text-xs shadow-md transition-all active:scale-95 border-r border-emerald-500/30"
-            >
+          <div className="flex gap-0.5 col-span-2 sm:col-auto">
+            <button onClick={() => withAdmin(() => document.getElementById('import-routes-input')?.click())} className="flex-1 bg-emerald-600 text-white px-4 py-2 md:px-5 md:py-2.5 rounded-l-xl font-bold flex items-center justify-center gap-1.5 text-[9px] md:text-xs shadow-md border-r border-emerald-500/30">
               {isAdmin ? '🗺️' : '🔒'} Rotas
             </button>
             <input id="import-routes-input" type="file" className="hidden" accept=".csv, .xlsx, .xls" onChange={handleRouteFileUpload} />
-            
             {routeCount > 0 && (
-              <button 
-                onClick={() => withAdmin(() => setShowDeleteModal(true))}
-                className="bg-red-500 hover:bg-red-600 text-white px-3 py-2.5 rounded-r-xl font-bold text-xs shadow-md transition-all"
-              >
+              <button onClick={() => withAdmin(() => setShowDeleteModal(true))} className="bg-red-500 text-white px-3 py-2 md:px-3 md:py-2.5 rounded-r-xl font-bold text-[9px] md:text-xs shadow-md transition-all">
                 {isAdmin ? '🗑️' : '🔒'}
               </button>
             )}
           </div>
           {isAdmin && (
-            <button onClick={() => { setIsAdmin(false); sessionStorage.removeItem('ihs_admin'); }} className="p-2 text-gray-400 hover:text-red-500 transition-colors" title="Sair do modo Admin">🔓</button>
+            <button onClick={() => { setIsAdmin(false); sessionStorage.removeItem('ihs_admin'); }} className="hidden lg:block p-2 text-gray-400 hover:text-red-500" title="Logout Admin">🔓</button>
           )}
         </div>
       </header>
 
       {(isFetchingCities || isLoadingSupabase || isProcessingFile) && (
-        <div className="bg-blue-600 text-white p-3 rounded-xl text-center text-xs font-black animate-pulse flex items-center justify-center gap-3">
-          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-          {isLoadingSupabase ? 'SINCRONIZANDO COM SUPABASE...' : 
-           isProcessingFile ? 'SALVANDO TICKETS NA NUVEM...' :
-           'ATUALIZANDO GEO-LOCALIZAÇÃO DAS ROTAS...'}
+        <div className="bg-blue-600 text-white p-2.5 rounded-xl text-center text-[9px] md:text-xs font-black animate-pulse flex items-center justify-center gap-2">
+          <div className="w-3 h-3 md:w-4 md:h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+          {isLoadingSupabase ? 'SINCRONIZANDO...' : isProcessingFile ? 'SALVANDO NA NUVEM...' : 'GEOLOCALIZANDO...'}
         </div>
       )}
 
       {allData.length > 0 && (
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-wrap items-center gap-4">
-          <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
-            <span className="text-[10px] font-black text-gray-400 uppercase ml-1">Seletor Global de Rota</span>
+        <div className="bg-white p-3 md:p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col sm:flex-row items-center gap-3 md:gap-4">
+          <div className="flex flex-col gap-1 w-full">
+            <span className="text-[8px] md:text-[10px] font-black text-gray-400 uppercase ml-1">Seletor Global de Rota</span>
             <div className="relative">
               <select 
                 value={selectedRouteFilter} 
                 onChange={(e) => setSelectedRouteFilter(e.target.value)}
-                className="w-full pl-4 pr-10 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold text-gray-700 outline-none appearance-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+                className="w-full pl-4 pr-10 py-2.5 md:py-3 bg-gray-50 border border-gray-200 rounded-xl text-xs md:text-sm font-bold text-gray-700 outline-none appearance-none focus:ring-2 focus:ring-blue-500/20"
               >
-                <option value="All">🌍 Todas as Rotas (Visão Geral)</option>
+                <option value="All">🌍 Todas as Rotas</option>
                 {routeList.map(city => <option key={city} value={city}>📍 {city}</option>)}
               </select>
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">▼</div>
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 text-xs">▼</div>
             </div>
           </div>
           <button 
             onClick={() => {setSelectedRouteFilter('All'); setSelectedStatus('All'); setSearchTerm('');}} 
-            className="mt-5 px-6 py-3 bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-xl text-xs font-black shadow-md transition-all active:scale-95"
+            className="w-full sm:w-auto px-6 py-2.5 md:py-3 bg-[#3b82f6] text-white rounded-xl text-[10px] md:text-xs font-black shadow-md shrink-0 sm:mt-4"
           >
-            Resetar Filtros
+            Limpar Filtros
           </button>
         </div>
       )}
 
       {allData.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-40 bg-white rounded-3xl shadow-sm border border-dashed border-gray-300">
-          <div className="text-6xl mb-4 text-blue-200">🚀</div>
-          <p className="text-xl font-black text-gray-600 uppercase tracking-tighter">Pronto para Análise</p>
-          <p className="text-gray-400 text-sm mt-2 text-center max-w-sm">Os tickets salvos no Supabase persistirão após o recarregamento da página.</p>
+        <div className="flex flex-col items-center justify-center py-20 md:py-40 bg-white rounded-3xl shadow-sm border border-dashed border-gray-300 mx-2">
+          <div className="text-4xl md:text-6xl mb-4 text-blue-200">🚀</div>
+          <p className="text-base md:text-xl font-black text-gray-600 uppercase tracking-tighter">Pronto para Iniciar</p>
+          <p className="text-gray-400 text-[10px] md:text-sm mt-2 text-center max-w-[250px] md:max-w-sm px-4">Os tickets salvos no Supabase persistirão após recarregar.</p>
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <StatCard label={`Tickets (${selectedRouteFilter === 'All' ? 'Geral' : selectedRouteFilter})`} value={totals.total} icon="📊" color="blue" />
-            <StatCard label="Faturados (Prejuízo)" value={totals.faturados} icon="🛑" color="red" />
-            <StatCard label="Revertidos (Sucesso)" value={totals.revertidos} icon="✅" color="green" />
-            <StatCard label="PNR Geral" value={formatCurrency(totals.value)} icon="💰" color="amber" />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+            <StatCard label={`Tickets`} value={totals.total} icon="📊" color="blue" />
+            <StatCard label="Faturados" value={totals.faturados} icon="🛑" color="red" />
+            <StatCard label="Revertidos" value={totals.revertidos} icon="✅" color="green" />
+            <StatCard label="PNR Geral" value={formatCurrency(totals.value)} icon="💰" color="amber" isValue />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-            <InsightList title="Top 5 Melhores Profissionais" icon="🏆" type="best">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 md:gap-6">
+            <InsightList title="Top 5 Melhores" icon="🏆" type="best">
               {insights.topDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} detail={`${d.totalTickets} tks`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="best" />)}
             </InsightList>
-            <InsightList title="Top 5 Maior Volume (Crítico)" icon="🚨" type="worst">
-              {insights.topVolumeDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={d.totalTickets} detail={`Total de Tickets`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="worst" />)}
+            <InsightList title="Top 5 Volume" icon="🚨" type="worst">
+              {insights.topVolumeDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={d.totalTickets} detail={`Total Tickets`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="worst" />)}
             </InsightList>
-            <InsightList title="Top 5 Piores Profissionais" icon="⚠️" type="worst">
-              {insights.bottomDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} detail={`Perda: ${formatCurrency(d.faturadosValue)}`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="worst" />)}
+            <InsightList title="Top 5 Piores" icon="⚠️" type="worst">
+              {insights.bottomDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} detail={`Fat: ${formatCurrency(d.faturadosValue)}`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="worst" />)}
             </InsightList>
-            <InsightList title="Top 5 Rotas Eficientes" icon="📍" type="best">
-              {insights.topRoutes.map((r, i) => <CompactHighlight key={i} name={r.locationName} metric={`${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} detail={`${r.totalTickets} tickets`} type="best" />)}
+            <InsightList title="Top 5 Rotas Efficientes" icon="📍" type="best">
+              {insights.topRoutes.map((r, i) => <CompactHighlight key={i} name={r.locationName} metric={`${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} detail={`${r.totalTickets} tks`} type="best" />)}
             </InsightList>
-            <InsightList title="Top 5 Rotas Críticas (Volume)" icon="📉" type="worst">
+            <InsightList title="Top 5 Rotas Críticas" icon="📉" type="worst">
               {insights.bottomRoutes.map((r, i) => <CompactHighlight key={i} name={r.locationName} metric={r.totalTickets} detail={`Taxa: ${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} type="worst" />)}
             </InsightList>
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-            <div className="xl:col-span-1 bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100 h-fit">
-              <div className="p-6 border-b border-gray-100 bg-[#1e293b] text-white">
-                <h3 className="text-lg font-bold">Monitoramento de Rotas</h3>
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 md:gap-8">
+            <div className="xl:col-span-1 bg-white rounded-2xl md:rounded-3xl shadow-lg overflow-hidden border border-gray-100 h-fit">
+              <div className="p-4 md:p-6 border-b border-gray-100 bg-[#1e293b] text-white">
+                <h3 className="text-base md:text-lg font-bold uppercase tracking-tight">Monitoramento de Rotas</h3>
               </div>
-              <div className="max-h-[500px] overflow-y-auto">
+              <div className="max-h-[300px] md:max-h-[500px] overflow-y-auto">
                 <table className="w-full text-left divide-y divide-gray-50">
-                  <tbody>
+                  <tbody className="divide-y divide-gray-100">
                     {filteredRouteStats.map((r, idx) => {
                       const perf = (r.revertidos / (r.totalTickets || 1)) * 100;
                       return (
                         <tr key={idx} className={`hover:bg-blue-50 transition-colors cursor-pointer ${selectedRouteFilter === r.locationName ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`} onClick={() => setSelectedRouteFilter(r.locationName)}>
-                          <td className="px-5 py-4 flex flex-col">
-                            <span className="font-black text-xs uppercase text-gray-700">{r.locationName}</span>
-                            <span className="text-[9px] text-gray-400">{r.drivers.size} entregadores</span>
+                          <td className="px-4 py-3 md:px-5 md:py-4 flex flex-col">
+                            <span className="font-black text-[10px] md:text-xs uppercase text-gray-700 truncate max-w-[150px] md:max-w-none">{r.locationName}</span>
+                            <span className="text-[8px] md:text-[9px] text-gray-400">{r.drivers.size} entregadores</span>
                           </td>
-                          <td className="px-5 py-4 text-right">
-                             <span className={`text-xs font-black ${perf > 70 ? 'text-emerald-600' : 'text-red-600'}`}>{perf.toFixed(0)}%</span>
+                          <td className="px-4 py-3 md:px-5 md:py-4 text-right">
+                             <span className={`text-[10px] md:text-xs font-black ${perf > 70 ? 'text-emerald-600' : 'text-red-600'}`}>{perf.toFixed(0)}%</span>
                           </td>
                         </tr>
                       );
@@ -851,48 +815,46 @@ const App: React.FC = () => {
                 </table>
               </div>
             </div>
-            <div className="xl:col-span-2 bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100">
-              <div className="p-6 border-b border-gray-100 header-gradient text-white flex justify-between items-center">
-                <h3 className="text-xl font-black">Ranking de Profissionais</h3>
-                <input type="text" placeholder="Filtrar nome..." className="px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-sm text-white outline-none w-48" onChange={(e) => handlePerformanceSearchChange(e.target.value)} />
+
+            <div className="xl:col-span-2 bg-white rounded-2xl md:rounded-3xl shadow-lg overflow-hidden border border-gray-100">
+              <div className="p-4 md:p-6 border-b border-gray-100 header-gradient text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <h3 className="text-base md:text-xl font-black uppercase tracking-tight">Ranking</h3>
+                <input type="text" placeholder="Filtrar motorista..." className="px-4 py-2 bg-white/10 border border-white/20 rounded-xl text-xs md:text-sm text-white outline-none w-full sm:w-48 placeholder-white/50" onChange={(e) => handlePerformanceSearchChange(e.target.value)} />
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-gray-100 text-gray-500 text-[9px] font-black uppercase tracking-widest border-b border-gray-200">
+                <table className="w-full text-left border-collapse min-w-[500px] md:min-w-0">
+                  <thead className="bg-gray-100 text-gray-500 text-[8px] md:text-[9px] font-black uppercase tracking-widest border-b border-gray-200">
                     <tr>
-                      <th className="px-6 py-4 cursor-pointer" onClick={() => toggleSort('name')}>Motorista</th>
-                      <th className="px-6 py-4 text-center cursor-pointer" onClick={() => toggleSort('performance')}>Taxa</th>
-                      <th className="px-6 py-4 text-center cursor-pointer" onClick={() => toggleSort('totalTickets')}>Tks</th>
-                      <th className="px-6 py-4 text-right cursor-pointer" onClick={() => toggleSort('totalValue')}>PNR</th>
-                      <th className="px-6 py-4 text-right text-red-600 cursor-pointer" onClick={() => toggleSort('faturadosValue')}>Faturado</th>
+                      <th className="px-4 py-3 md:px-6 md:py-4 cursor-pointer" onClick={() => toggleSort('name')}>Motorista</th>
+                      <th className="px-4 py-3 md:px-6 md:py-4 text-center cursor-pointer" onClick={() => toggleSort('performance')}>Taxa</th>
+                      <th className="px-4 py-3 md:px-6 md:py-4 text-center cursor-pointer" onClick={() => toggleSort('totalTickets')}>Tks</th>
+                      <th className="px-4 py-3 md:px-6 md:py-4 text-right cursor-pointer" onClick={() => toggleSort('totalValue')}>PNR</th>
+                      <th className="px-4 py-3 md:px-6 md:py-4 text-right text-red-600 cursor-pointer" onClick={() => toggleSort('faturadosValue')}>Faturado</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {filteredPerformanceStats.map((stat, idx) => (
                       <tr key={idx} className="hover:bg-blue-50/50 transition-all">
-                        <td className="px-6 py-5 flex flex-col gap-1">
-                          <span className="font-bold text-gray-800 text-xs uppercase">{stat.name}</span>
+                        <td className="px-4 py-4 md:px-6 md:py-5 flex flex-col gap-1">
+                          <span className="font-bold text-gray-800 text-[10px] md:text-xs uppercase truncate max-w-[120px] md:max-w-none">{stat.name}</span>
                           {stat.routes?.[0] && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleRouteClick(stat.routes![0]);
                               }}
-                              className="text-[8px] font-black px-1.5 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 w-fit hover:bg-blue-600 hover:text-white hover:border-blue-700 transition-all cursor-pointer shadow-sm active:scale-95"
+                              className="text-[7px] md:text-[8px] font-black px-1.5 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 w-fit hover:bg-blue-600 hover:text-white transition-all shadow-sm"
                             >
                               {stat.routes[0]}
                             </button>
                           )}
                         </td>
-                        <td 
-                          className="px-6 py-5 text-center font-black text-xs cursor-help" 
-                          title={`${stat.faturados} tickets faturados`}
-                        >
+                        <td className="px-4 py-4 md:px-6 md:py-5 text-center font-black text-[10px] md:text-xs" title={`${stat.faturados} tickets faturados`}>
                           {((stat.revertidos/(stat.totalTickets || 1))*100).toFixed(1)}%
                         </td>
-                        <td className="px-6 py-5 text-center font-bold text-gray-700 text-xs">{stat.totalTickets}</td>
-                        <td className="px-6 py-5 text-right font-semibold text-gray-600 text-xs">{formatCurrency(stat.totalValue)}</td>
-                        <td className="px-6 py-5 text-right text-red-600 font-black text-xs">{formatCurrency(stat.faturadosValue)}</td>
+                        <td className="px-4 py-4 md:px-6 md:py-5 text-center font-bold text-gray-700 text-[10px] md:text-xs">{stat.totalTickets}</td>
+                        <td className="px-4 py-4 md:px-6 md:py-5 text-right font-semibold text-gray-600 text-[10px] md:text-xs">{formatCurrency(stat.totalValue)}</td>
+                        <td className="px-4 py-4 md:px-6 md:py-5 text-right text-red-600 font-black text-[10px] md:text-xs">{formatCurrency(stat.faturadosValue)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -906,43 +868,53 @@ const App: React.FC = () => {
   );
 };
 
-const StatCard = ({ label, value, icon, color }: any) => {
-  const colors: any = { blue: 'bg-blue-50 text-blue-600 border-blue-100', amber: 'bg-amber-50 text-amber-600 border-amber-100', green: 'bg-emerald-50 text-emerald-600 border-emerald-100', red: 'bg-red-50 text-red-600 border-red-100' };
+const StatCard = ({ label, value, icon, color, isValue }: any) => {
+  const colors: any = { 
+    blue: 'bg-blue-50 text-blue-600 border-blue-100', 
+    amber: 'bg-amber-50 text-amber-600 border-amber-100', 
+    green: 'bg-emerald-50 text-emerald-600 border-emerald-100', 
+    red: 'bg-red-50 text-red-600 border-red-100' 
+  };
   return (
-    <div className={`bg-white p-6 rounded-2xl shadow-lg border-2 flex items-center justify-between transition-all ${colors[color]}`}>
-      <div><p className="text-gray-500 font-black text-[9px] uppercase tracking-widest">{label}</p><p className="text-2xl font-black text-gray-900 tracking-tighter">{value}</p></div>
-      <div className={`p-4 rounded-xl text-2xl ${colors[color]}`}>{icon}</div>
+    <div className={`bg-white p-3 md:p-6 rounded-2xl shadow-sm border flex items-center justify-between transition-all ${colors[color]}`}>
+      <div className="overflow-hidden">
+        <p className="text-gray-500 font-black text-[7px] md:text-[9px] uppercase tracking-widest truncate">{label}</p>
+        <p className={`font-black text-gray-900 tracking-tighter ${isValue ? 'text-sm md:text-xl' : 'text-lg md:text-2xl'}`}>{value}</p>
+      </div>
+      <div className={`hidden sm:flex p-2.5 md:p-4 rounded-xl text-lg md:text-2xl ${colors[color]}`}>{icon}</div>
     </div>
   );
 };
 
 const InsightList = ({ title, icon, type, children }: any) => (
-  <div className={`bg-white rounded-2xl shadow-md border-t-4 ${type === 'best' ? 'border-emerald-500' : 'border-red-500'} overflow-hidden`}>
-    <div className="px-4 py-3 bg-gray-50 border-b border-gray-100"><h4 className="text-[10px] font-black uppercase text-gray-500">{icon} {title}</h4></div>
-    <div className="p-3 space-y-2">{children}</div>
+  <div className={`bg-white rounded-2xl shadow-sm border-t-4 ${type === 'best' ? 'border-emerald-500' : 'border-red-500'} overflow-hidden`}>
+    <div className="px-3 py-2 md:px-4 md:py-3 bg-gray-50 border-b border-gray-100">
+      <h4 className="text-[8px] md:text-[10px] font-black uppercase text-gray-500 truncate">{icon} {title}</h4>
+    </div>
+    <div className="p-2 md:p-3 space-y-2">{children}</div>
   </div>
 );
 
 const CompactHighlight = ({ name, metric, detail, type, route, onRouteClick }: any) => (
-  <div className="flex items-center justify-between p-2 rounded-xl bg-gray-50 border border-gray-100">
-    <div className="flex flex-col gap-0.5 overflow-hidden">
-      <span className="text-[11px] font-black text-gray-800 uppercase line-clamp-1 truncate">{name}</span>
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[9px] text-gray-400 whitespace-nowrap">{detail}</span>
+  <div className="flex items-center justify-between p-1.5 md:p-2 rounded-xl bg-gray-50 border border-gray-100 hover:border-blue-200 transition-colors">
+    <div className="flex flex-col gap-0.5 overflow-hidden flex-1">
+      <span className="text-[9px] md:text-[11px] font-black text-gray-800 uppercase line-clamp-1 truncate">{name}</span>
+      <div className="flex items-center gap-1 overflow-hidden">
+        <span className="text-[7px] md:text-[9px] text-gray-400 whitespace-nowrap">{detail}</span>
         {route && (
           <button
             onClick={(e) => {
               e.stopPropagation();
               onRouteClick?.(route);
             }}
-            className="text-[7px] font-black px-1.5 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-600 hover:text-white hover:border-blue-700 transition-all cursor-pointer shadow-sm active:scale-95"
+            className="text-[6px] md:text-[7px] font-black px-1 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 whitespace-nowrap"
           >
             {route}
           </button>
         )}
       </div>
     </div>
-    <span className={`text-sm font-black shrink-0 ${type === 'best' ? 'text-emerald-600' : 'text-red-600'}`}>{metric}</span>
+    <span className={`text-[11px] md:text-sm font-black shrink-0 ml-2 ${type === 'best' ? 'text-emerald-600' : 'text-red-600'}`}>{metric}</span>
   </div>
 );
 
