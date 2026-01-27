@@ -897,19 +897,19 @@ const App: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 md:gap-6">
-            <InsightList title="Top 5 Melhores" icon="🏆" type="best">
+            <InsightList title="Top 5 Melhores (Performance)" icon="🏆" type="best">
               {insights.topDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} detail={`${d.totalTickets} tks`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="best" />)}
             </InsightList>
-            <InsightList title="Top 5 Volume" icon="🚨" type="worst">
+            <InsightList title="Top 5 Volume (Volume)" icon="🚨" type="worst">
               {insights.topVolumeDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={d.totalTickets} detail={`Total Tickets`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="worst" />)}
             </InsightList>
-            <InsightList title="Top 5 Piores" icon="⚠️" type="worst">
+            <InsightList title="Top 5 Piores (Performance)" icon="⚠️" type="worst">
               {insights.bottomDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} detail={`Fat: ${formatCurrency(d.faturadosValue)}`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="worst" />)}
             </InsightList>
-            <InsightList title="Top 5 Rotas Efficientes" icon="📍" type="best">
+            <InsightList title="Top 5 Rotas Eficientes (Performance)" icon="📍" type="best">
               {insights.topRoutes.map((r, i) => <CompactHighlight key={i} name={r.locationName} metric={`${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} detail={`${r.totalTickets} tks`} type="best" />)}
             </InsightList>
-            <InsightList title="Top 5 Rotas Críticas" icon="📉" type="worst">
+            <InsightList title="Top 5 Rotas Críticas (Volume)" icon="📉" type="worst">
               {insights.bottomRoutes.map((r, i) => <CompactHighlight key={i} name={r.locationName} metric={r.totalTickets} detail={`Taxa: ${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} type="worst" />)}
             </InsightList>
           </div>
