@@ -198,6 +198,12 @@ const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleDriverClick = (driver: string) => {
+    setSearchTerm(driver);
+    setPerformanceSearch(driver);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const fetchCityInfo = async (cep: string) => {
     const cleanCep = (cep as string).replace(/\D/g, '');
     if (cleanCep.length !== 8) return null;
@@ -898,19 +904,70 @@ const App: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 md:gap-6">
             <InsightList title="Top 5 Melhores (Performance)" icon="🏆" type="best">
-              {insights.topDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} detail={`${d.totalTickets} tks`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="best" />)}
+              {insights.topDrivers.map((d, i) => (
+                <CompactHighlight 
+                  key={i} 
+                  name={d.name} 
+                  metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} 
+                  detail={`${d.totalTickets} tks`} 
+                  route={d.routes?.[0]} 
+                  onRouteClick={handleRouteClick} 
+                  onClick={() => handleDriverClick(d.name)}
+                  type="best" 
+                />
+              ))}
             </InsightList>
             <InsightList title="Top 5 Volume (Volume)" icon="🚨" type="worst">
-              {insights.topVolumeDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={d.totalTickets} detail={`Total Tickets`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="worst" />)}
+              {insights.topVolumeDrivers.map((d, i) => (
+                <CompactHighlight 
+                  key={i} 
+                  name={d.name} 
+                  metric={d.totalTickets} 
+                  detail={`Total Tickets`} 
+                  route={d.routes?.[0]} 
+                  onRouteClick={handleRouteClick} 
+                  onClick={() => handleDriverClick(d.name)}
+                  type="worst" 
+                />
+              ))}
             </InsightList>
             <InsightList title="Top 5 Piores (Performance)" icon="⚠️" type="worst">
-              {insights.bottomDrivers.map((d, i) => <CompactHighlight key={i} name={d.name} metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} detail={`Fat: ${formatCurrency(d.faturadosValue)}`} route={d.routes?.[0]} onRouteClick={handleRouteClick} type="worst" />)}
+              {insights.bottomDrivers.map((d, i) => (
+                <CompactHighlight 
+                  key={i} 
+                  name={d.name} 
+                  metric={`${((d.revertidos/d.totalTickets)*100).toFixed(0)}%`} 
+                  detail={`Fat: ${formatCurrency(d.faturadosValue)}`} 
+                  route={d.routes?.[0]} 
+                  onRouteClick={handleRouteClick} 
+                  onClick={() => handleDriverClick(d.name)}
+                  type="worst" 
+                />
+              ))}
             </InsightList>
             <InsightList title="Top 5 Rotas Eficientes (Performance)" icon="📍" type="best">
-              {insights.topRoutes.map((r, i) => <CompactHighlight key={i} name={r.locationName} metric={`${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} detail={`${r.totalTickets} tks`} type="best" />)}
+              {insights.topRoutes.map((r, i) => (
+                <CompactHighlight 
+                  key={i} 
+                  name={r.locationName} 
+                  metric={`${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} 
+                  detail={`${r.totalTickets} tks`} 
+                  onClick={() => handleRouteClick(r.locationName)}
+                  type="best" 
+                />
+              ))}
             </InsightList>
             <InsightList title="Top 5 Rotas Críticas (Volume)" icon="📉" type="worst">
-              {insights.bottomRoutes.map((r, i) => <CompactHighlight key={i} name={r.locationName} metric={r.totalTickets} detail={`Taxa: ${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} type="worst" />)}
+              {insights.bottomRoutes.map((r, i) => (
+                <CompactHighlight 
+                  key={i} 
+                  name={r.locationName} 
+                  metric={r.totalTickets} 
+                  detail={`Taxa: ${((r.revertidos/r.totalTickets)*100).toFixed(0)}%`} 
+                  onClick={() => handleRouteClick(r.locationName)}
+                  type="worst" 
+                />
+              ))}
             </InsightList>
           </div>
 
@@ -1022,8 +1079,11 @@ const InsightList = ({ title, icon, type, children }: any) => (
   </div>
 );
 
-const CompactHighlight = ({ name, metric, detail, type, route, onRouteClick }: any) => (
-  <div className="flex items-center justify-between p-1.5 md:p-2 rounded-xl bg-gray-50 border border-gray-100 hover:border-blue-200 transition-colors">
+const CompactHighlight = ({ name, metric, detail, type, route, onRouteClick, onClick }: any) => (
+  <div 
+    onClick={onClick}
+    className={`flex items-center justify-between p-1.5 md:p-2 rounded-xl bg-gray-50 border border-gray-100 hover:border-blue-200 transition-colors ${onClick ? 'cursor-pointer hover:bg-blue-50' : ''}`}
+  >
     <div className="flex flex-col gap-0.5 overflow-hidden flex-1">
       <span className="text-[9px] md:text-[11px] font-black text-gray-800 uppercase line-clamp-1 truncate">{name}</span>
       <div className="flex items-center gap-1 overflow-hidden">
@@ -1034,7 +1094,7 @@ const CompactHighlight = ({ name, metric, detail, type, route, onRouteClick }: a
               e.stopPropagation();
               onRouteClick?.(route);
             }}
-            className="text-[6px] md:text-[7px] font-black px-1 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 whitespace-nowrap"
+            className="text-[6px] md:text-[7px] font-black px-1 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 whitespace-nowrap hover:bg-blue-600 hover:text-white transition-all"
           >
             {route}
           </button>
