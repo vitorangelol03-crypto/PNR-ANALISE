@@ -53,18 +53,35 @@ function capContext(parts: string[], maxLines = 150): string {
   return result;
 }
 
+function computeDriverStats(tickets: any[]) {
+  const stats = new Map<string, { total: number; rev: number; val: number; revVal: number; ceps: Set<string>; reasons: Map<string, number> }>();
+  tickets.forEach(t => {
+    const d = t.driver || 'Desconhecido';
+    const s = stats.get(d) || { total: 0, rev: 0, val: 0, revVal: 0, ceps: new Set<string>(), reasons: new Map<string, number>() };
+    s.total++;
+    s.val += (t.pnr_value || 0);
+    if (t.cep) s.ceps.add(t.cep);
+    if (t.status === 'Reversed') {
+      s.rev++;
+      s.revVal += (t.pnr_value || 0);
+      const r = t.rejection_reason || t.rejectionReason || 'Sem motivo';
+      s.reasons.set(r, (s.reasons.get(r) || 0) + 1);
+    }
+    stats.set(d, s);
+  });
+  return stats;
+}
+
 async function buildContext(userQuery: string): Promise<string> {
   const parts: string[] = [];
 
-  const [ticketsRes, driversRes, routesRes, linksRes, metaRes] = await Promise.all([
-    supabase.from('tickets').select('*').limit(500),
+  const [driversRes, routesRes, linksRes, metaRes] = await Promise.all([
     supabase.from('drivers').select('*').eq('is_excluded', false).order('name'),
     supabase.from('routes').select('*').order('name'),
     supabase.from('driver_route_links').select('*'),
     supabase.from('dashboard_meta').select('*').limit(5),
   ]);
 
-  const tickets = ticketsRes.data || [];
   const drivers = driversRes.data || [];
   const routes = routesRes.data || [];
   const links = linksRes.data || [];
@@ -76,26 +93,12 @@ async function buildContext(userQuery: string): Promise<string> {
   metaRows.forEach((m: any) => metaMap.set(m.key, m.value));
   if (metaMap.has('reference_date')) parts.push(`PERÍODO: ${metaMap.get('reference_date')}`);
 
-  const faturados = tickets.filter(t => t.status === 'ForBilling');
-  const revertidos = tickets.filter(t => t.status === 'Reversed');
-
-  const driverStats = new Map<string, { total: number; rev: number; val: number; revVal: number; ceps: Set<string>; reasons: Map<string, number> }>();
-  tickets.forEach(t => {
-    const d = t.driver || 'Desconhecido';
-    const s = driverStats.get(d) || { total: 0, rev: 0, val: 0, revVal: 0, ceps: new Set<string>(), reasons: new Map<string, number>() };
-    s.total++;
-    s.val += (t.pnr_value || 0);
-    if (t.cep) s.ceps.add(t.cep);
-    if (t.status === 'Reversed') {
-      s.rev++;
-      s.revVal += (t.pnr_value || 0);
-      const r = t.rejection_reason || t.rejectionReason || 'Sem motivo';
-      s.reasons.set(r, (s.reasons.get(r) || 0) + 1);
-    }
-    driverStats.set(d, s);
-  });
-
   if (intent.matchedDrivers.length > 0) {
+    const driverNames = intent.matchedDrivers.map(d => d.name);
+    const { data: driverTickets } = await supabase.from('tickets').select('*').in('driver', driverNames);
+    const tickets = driverTickets || [];
+    const driverStats = computeDriverStats(tickets);
+
     parts.push(`\nDETALHES DOS MOTORISTAS MENCIONADOS:`);
     intent.matchedDrivers.forEach(d => {
       const stats = driverStats.get(d.name);
@@ -123,6 +126,15 @@ async function buildContext(userQuery: string): Promise<string> {
   }
 
   if (intent.matchedRoutes.length > 0) {
+    const allRouteCeps = intent.matchedRoutes.flatMap(r => r.ceps || []);
+
+    let routeTickets: any[] = [];
+    if (allRouteCeps.length > 0) {
+      const orFilter = allRouteCeps.map((c: string) => `cep.like.${c}%`).join(',');
+      const { data } = await supabase.from('tickets').select('*').or(orFilter);
+      routeTickets = data || [];
+    }
+
     parts.push(`\nDETALHES DAS ROTAS MENCIONADAS:`);
     intent.matchedRoutes.forEach(r => {
       const routeLinks = links.filter(l => l.route_id === r.id);
@@ -131,13 +143,13 @@ async function buildContext(userQuery: string): Promise<string> {
       parts.push(`  Motoristas: ${routeDriverNames.join(', ') || 'nenhum'}`);
 
       const routeCeps = r.ceps || [];
-      const routeTickets = tickets.filter(t => routeCeps.some((rc: string) => (t.cep || '').startsWith(rc)));
-      const routeRev = routeTickets.filter(t => t.status === 'Reversed');
-      parts.push(`  ${routeTickets.length} tickets, ${routeRev.length} revertidos`);
+      const thisRouteTickets = routeTickets.filter(t => routeCeps.some((rc: string) => (t.cep || '').startsWith(rc)));
+      const thisRouteRev = thisRouteTickets.filter(t => t.status === 'Reversed');
+      parts.push(`  ${thisRouteTickets.length} tickets, ${thisRouteRev.length} revertidos`);
 
-      if (routeRev.length > 0) {
+      if (thisRouteRev.length > 0) {
         const driverRevs = new Map<string, number>();
-        routeRev.forEach(t => driverRevs.set(t.driver || '?', (driverRevs.get(t.driver || '?') || 0) + 1));
+        thisRouteRev.forEach(t => driverRevs.set(t.driver || '?', (driverRevs.get(t.driver || '?') || 0) + 1));
         const topD = [...driverRevs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
         parts.push(`  Ofensores: ${topD.map(([n, c]) => `${n} (${c}x)`).join(', ')}`);
       }
@@ -146,12 +158,16 @@ async function buildContext(userQuery: string): Promise<string> {
   }
 
   if (intent.ceps.length > 0) {
+    const orFilter = intent.ceps.map(c => `cep.like.${c.replace('-', '')}%`).join(',');
+    const { data: cepTicketsData } = await supabase.from('tickets').select('*').or(orFilter);
+    const cepTickets = cepTicketsData || [];
+
     parts.push(`\nCEPs SOLICITADOS:`);
     intent.ceps.forEach(cep => {
       const prefix = cep.replace('-', '');
-      const cepTickets = tickets.filter(t => (t.cep || '').startsWith(prefix));
-      const cepRev = cepTickets.filter(t => t.status === 'Reversed');
-      parts.push(`- CEP ${cep}: ${cepTickets.length} tickets, ${cepRev.length} revertidos`);
+      const matched = cepTickets.filter(t => (t.cep || '').startsWith(prefix));
+      const cepRev = matched.filter(t => t.status === 'Reversed');
+      parts.push(`- CEP ${cep}: ${matched.length} tickets, ${cepRev.length} revertidos`);
       const cepDrivers = new Map<string, number>();
       cepRev.forEach(t => cepDrivers.set(t.driver || '?', (cepDrivers.get(t.driver || '?') || 0) + 1));
       if (cepDrivers.size > 0) {
@@ -161,6 +177,12 @@ async function buildContext(userQuery: string): Promise<string> {
     });
     return capContext(parts);
   }
+
+  const { data: ticketsData } = await supabase.from('tickets').select('*').limit(500);
+  const tickets = ticketsData || [];
+  const faturados = tickets.filter(t => t.status === 'ForBilling');
+  const revertidos = tickets.filter(t => t.status === 'Reversed');
+  const driverStats = computeDriverStats(tickets);
 
   parts.push(`TOTAL: ${tickets.length} tickets | Faturados: ${faturados.length} (R$ ${faturados.reduce((s, t) => s + (t.pnr_value || 0), 0).toFixed(2)}) | Revertidos: ${revertidos.length} (R$ ${revertidos.reduce((s, t) => s + (t.pnr_value || 0), 0).toFixed(2)})`);
 
