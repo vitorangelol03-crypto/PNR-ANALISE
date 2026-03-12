@@ -18,13 +18,17 @@ async function buildContext(): Promise<string> {
   const routes = routesRes.data || [];
   const links = linksRes.data || [];
   const routeMap = routeMapRes.data || [];
-  const meta = metaRes.data?.[0] || null;
+  const metaRows = metaRes.data || [];
   const cityCache = cityCacheRes.data || [];
 
-  if (meta) {
-    parts.push(`DATA DE REFERÊNCIA: ${meta.reference_date || 'não definida'}`);
-    parts.push(`ÚLTIMA ATUALIZAÇÃO: ${meta.last_updated || 'não definida'}`);
+  const metaMap = new Map<string, string>();
+  metaRows.forEach((m: any) => metaMap.set(m.key, m.value));
+  if (metaMap.has('reference_date')) {
+    parts.push(`DATA DE REFERÊNCIA: ${metaMap.get('reference_date')}`);
   }
+  metaRows.forEach((m: any) => {
+    if (m.updated_at) parts.push(`ÚLTIMA ATUALIZAÇÃO METADADOS: ${m.updated_at}`);
+  });
 
   parts.push(`\nRESUMO GERAL:`);
   parts.push(`Total de tickets: ${tickets.length}`);
