@@ -4,22 +4,38 @@ function normalizeText(text: string): string {
   return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
 
-function detectQueryIntent(query: string): { drivers: string[]; ceps: string[]; isGeneral: boolean } {
-  const normalized = normalizeText(query);
-  const drivers: string[] = [];
-  const ceps: string[] = [];
+interface QueryIntent {
+  matchedDrivers: any[];
+  ceps: string[];
+  wantsRoutes: boolean;
+  wantsCeps: boolean;
+  wantsDrivers: boolean;
+  wantsReasons: boolean;
+  isSpecific: boolean;
+}
 
-  const cepMatches = query.match(/\b\d{5}[-]?\d{0,3}\b/g);
-  if (cepMatches) ceps.push(...cepMatches);
+function classifyQuery(query: string, drivers: any[]): QueryIntent {
+  const nq = normalizeText(query);
+  const cepMatches = query.match(/\b\d{5}[-]?\d{0,3}\b/g) || [];
 
-  const isGeneral = !cepMatches || cepMatches.length === 0;
-  return { drivers, ceps, isGeneral };
+  const matchedDrivers = drivers.filter(d => {
+    const dn = normalizeText(d.name);
+    if (nq.includes(dn)) return true;
+    return d.name.split(' ').length > 1 && dn.split(' ').some((w: string) => w.length > 3 && nq.includes(w));
+  });
+
+  const wantsRoutes = /rota|route|grupo|vinculo|vincul/.test(nq);
+  const wantsCeps = /cep|regiao|area|bairro|cidade|endereco/.test(nq) || cepMatches.length > 0;
+  const wantsDrivers = /motorista|driver|ofensor|ranking|top|pior|melhor|desempenho|performance/.test(nq) || matchedDrivers.length > 0;
+  const wantsReasons = /motivo|razao|reason|rejeic|rejeit|porque|por que/.test(nq);
+
+  const isSpecific = matchedDrivers.length > 0 || cepMatches.length > 0;
+
+  return { matchedDrivers, ceps: cepMatches, wantsRoutes, wantsCeps, wantsDrivers, wantsReasons, isSpecific };
 }
 
 async function buildContext(userQuery: string): Promise<string> {
   const parts: string[] = [];
-  const intent = detectQueryIntent(userQuery);
-  const normalizedQuery = normalizeText(userQuery);
 
   const [ticketsRes, driversRes, routesRes, linksRes, metaRes] = await Promise.all([
     supabase.from('tickets').select('*').limit(2000),
@@ -35,95 +51,137 @@ async function buildContext(userQuery: string): Promise<string> {
   const links = linksRes.data || [];
   const metaRows = metaRes.data || [];
 
+  const intent = classifyQuery(userQuery, drivers);
+
   const metaMap = new Map<string, string>();
   metaRows.forEach((m: any) => metaMap.set(m.key, m.value));
-  if (metaMap.has('reference_date')) {
-    parts.push(`PERÍODO: ${metaMap.get('reference_date')}`);
-  }
+  if (metaMap.has('reference_date')) parts.push(`PERÍODO: ${metaMap.get('reference_date')}`);
 
   const faturados = tickets.filter(t => t.status === 'ForBilling');
   const revertidos = tickets.filter(t => t.status === 'Reversed');
   parts.push(`TOTAL: ${tickets.length} tickets | Faturados: ${faturados.length} (R$ ${faturados.reduce((s, t) => s + (t.pnr_value || 0), 0).toFixed(2)}) | Revertidos: ${revertidos.length} (R$ ${revertidos.reduce((s, t) => s + (t.pnr_value || 0), 0).toFixed(2)})`);
 
-  const driverStats = new Map<string, { total: number; rev: number; val: number; revVal: number }>();
+  const driverStats = new Map<string, { total: number; rev: number; val: number; revVal: number; ceps: Set<string>; reasons: Map<string, number> }>();
   tickets.forEach(t => {
     const d = t.driver || 'Desconhecido';
-    const s = driverStats.get(d) || { total: 0, rev: 0, val: 0, revVal: 0 };
+    const s = driverStats.get(d) || { total: 0, rev: 0, val: 0, revVal: 0, ceps: new Set<string>(), reasons: new Map<string, number>() };
     s.total++;
     s.val += (t.pnr_value || 0);
-    if (t.status === 'Reversed') { s.rev++; s.revVal += (t.pnr_value || 0); }
+    if (t.cep) s.ceps.add(t.cep);
+    if (t.status === 'Reversed') {
+      s.rev++;
+      s.revVal += (t.pnr_value || 0);
+      const r = t.rejection_reason || t.rejectionReason || 'Sem motivo';
+      s.reasons.set(r, (s.reasons.get(r) || 0) + 1);
+    }
     driverStats.set(d, s);
   });
 
-  const matchedDriverNames = drivers.filter(d =>
-    normalizedQuery.includes(normalizeText(d.name)) ||
-    (d.name.split(' ').length > 1 && normalizeText(d.name).split(' ').some((word: string) =>
-      word.length > 3 && normalizedQuery.includes(word)
-    ))
-  );
-
-  if (matchedDriverNames.length > 0) {
-    parts.push(`\nMOTORISTAS MENCIONADOS NA PERGUNTA:`);
-    matchedDriverNames.forEach(d => {
+  if (intent.matchedDrivers.length > 0) {
+    parts.push(`\nDETALHES DOS MOTORISTAS MENCIONADOS:`);
+    intent.matchedDrivers.forEach(d => {
       const stats = driverStats.get(d.name);
       const driverLinks = links.filter(l => l.driver_id === d.id);
       const linkedRoutes = driverLinks.map(l => routes.find(r => r.id === l.route_id)?.name || '?').join(', ');
       parts.push(`- ${d.name} | Rota fixa: ${d.fixed_route || '-'} | Rotas: ${linkedRoutes || '-'} | Ativo: ${d.is_active ? 'sim' : 'não'}`);
       if (stats) {
-        parts.push(`  → ${stats.total} tickets, ${stats.rev} revertidos (R$ ${stats.revVal.toFixed(2)}), total R$ ${stats.val.toFixed(2)}`);
+        const pct = stats.total > 0 ? ((stats.rev / stats.total) * 100).toFixed(0) : '0';
+        parts.push(`  ${stats.total} tickets, ${stats.rev} rev (${pct}%), R$ ${stats.revVal.toFixed(2)} revertido, R$ ${stats.val.toFixed(2)} total`);
+        if (stats.reasons.size > 0) {
+          const topReasons = [...stats.reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+          parts.push(`  Motivos: ${topReasons.map(([r, c]) => `${r} (${c}x)`).join(', ')}`);
+        }
+        if (stats.ceps.size > 0) {
+          parts.push(`  CEPs: ${[...stats.ceps].slice(0, 5).join(', ')}${stats.ceps.size > 5 ? ` (+${stats.ceps.size - 5})` : ''}`);
+        }
       }
     });
-  }
 
-  const sortedDriverStats = [...driverStats.entries()].sort((a, b) => b[1].rev - a[1].rev);
-  parts.push(`\nTOP 15 MOTORISTAS POR REVERSÕES:`);
-  sortedDriverStats.slice(0, 15).forEach(([name, s]) => {
-    const pct = s.total > 0 ? ((s.rev / s.total) * 100).toFixed(0) : '0';
-    parts.push(`- ${name}: ${s.total} tickets, ${s.rev} rev (${pct}%), R$ ${s.revVal.toFixed(2)}`);
-  });
+    if (!intent.wantsDrivers) {
+      parts.push(`\nMOTORISTAS: ${drivers.length} cadastrados, ${drivers.filter(d => d.is_active).length} ativos`);
+      return parts.join('\n');
+    }
+  }
 
   if (intent.ceps.length > 0) {
-    parts.push(`\nCEPs DA PERGUNTA:`);
+    parts.push(`\nCEPs SOLICITADOS:`);
     intent.ceps.forEach(cep => {
-      const cepTickets = tickets.filter(t => (t.cep || '').startsWith(cep.replace('-', '')));
+      const prefix = cep.replace('-', '');
+      const cepTickets = tickets.filter(t => (t.cep || '').startsWith(prefix));
       const cepRev = cepTickets.filter(t => t.status === 'Reversed');
       parts.push(`- CEP ${cep}: ${cepTickets.length} tickets, ${cepRev.length} revertidos`);
+      const cepDrivers = new Map<string, number>();
+      cepRev.forEach(t => cepDrivers.set(t.driver || '?', (cepDrivers.get(t.driver || '?') || 0) + 1));
+      if (cepDrivers.size > 0) {
+        const topD = [...cepDrivers.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+        parts.push(`  Motoristas com reversões: ${topD.map(([n, c]) => `${n} (${c}x)`).join(', ')}`);
+      }
+    });
+
+    if (!intent.wantsDrivers && !intent.wantsRoutes) {
+      parts.push(`\nMOTORISTAS: ${drivers.length} | ROTAS: ${routes.length}`);
+      return parts.join('\n');
+    }
+  }
+
+  if (intent.wantsDrivers || !intent.isSpecific) {
+    const sortedDriverStats = [...driverStats.entries()].sort((a, b) => b[1].rev - a[1].rev);
+    const limit = intent.isSpecific ? 5 : 10;
+    parts.push(`\nTOP ${limit} MOTORISTAS POR REVERSÕES:`);
+    sortedDriverStats.slice(0, limit).forEach(([name, s]) => {
+      const pct = s.total > 0 ? ((s.rev / s.total) * 100).toFixed(0) : '0';
+      parts.push(`- ${name}: ${s.total} tix, ${s.rev} rev (${pct}%), R$ ${s.revVal.toFixed(2)}`);
     });
   }
 
-  const cepStats = new Map<string, { total: number; rev: number }>();
-  tickets.forEach(t => {
-    const cep = t.cep || 'sem-cep';
-    const s = cepStats.get(cep) || { total: 0, rev: 0 };
-    s.total++;
-    if (t.status === 'Reversed') s.rev++;
-    cepStats.set(cep, s);
-  });
-  parts.push(`\nTOP 10 CEPs PROBLEMÁTICOS:`);
-  [...cepStats.entries()].sort((a, b) => b[1].rev - a[1].rev).slice(0, 10).forEach(([cep, s]) => {
-    parts.push(`- ${cep}: ${s.total} tickets, ${s.rev} rev`);
-  });
-
-  const reasons = new Map<string, number>();
-  revertidos.forEach(t => {
-    const r = t.rejection_reason || t.rejectionReason || 'Sem motivo';
-    reasons.set(r, (reasons.get(r) || 0) + 1);
-  });
-  parts.push(`\nMOTIVOS DE REVERSÃO:`);
-  [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).forEach(([reason, count]) => {
-    parts.push(`- ${reason}: ${count}x`);
-  });
-
-  if (normalizedQuery.includes('rota') || normalizedQuery.includes('route') || normalizedQuery.includes('grupo')) {
-    parts.push(`\nROTAS (${routes.length}):`);
-    routes.forEach(r => {
-      const routeDriverCount = links.filter(l => l.route_id === r.id).length;
-      parts.push(`- ${r.name} | Grupo: ${r.route_group || '-'} | ${routeDriverCount} motoristas`);
+  if (intent.wantsCeps || !intent.isSpecific) {
+    const cepStats = new Map<string, { total: number; rev: number }>();
+    tickets.forEach(t => {
+      const cep = t.cep || 'sem-cep';
+      const s = cepStats.get(cep) || { total: 0, rev: 0 };
+      s.total++;
+      if (t.status === 'Reversed') s.rev++;
+      cepStats.set(cep, s);
+    });
+    const limit = intent.isSpecific ? 5 : 8;
+    parts.push(`\nTOP ${limit} CEPs PROBLEMÁTICOS:`);
+    [...cepStats.entries()].sort((a, b) => b[1].rev - a[1].rev).slice(0, limit).forEach(([cep, s]) => {
+      parts.push(`- ${cep}: ${s.total} tix, ${s.rev} rev`);
     });
   }
 
-  parts.push(`\nMOTORISTAS: ${drivers.length} cadastrados, ${drivers.filter(d => d.is_active).length} ativos`);
-  parts.push(`ROTAS: ${routes.length} | VÍNCULOS: ${links.length}`);
+  if (intent.wantsReasons || !intent.isSpecific) {
+    const reasons = new Map<string, number>();
+    revertidos.forEach(t => {
+      const r = t.rejection_reason || t.rejectionReason || 'Sem motivo';
+      reasons.set(r, (reasons.get(r) || 0) + 1);
+    });
+    parts.push(`\nMOTIVOS DE REVERSÃO:`);
+    [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).forEach(([reason, count]) => {
+      parts.push(`- ${reason}: ${count}x`);
+    });
+  }
+
+  if (intent.wantsRoutes) {
+    const sortedRoutes = routes
+      .map(r => {
+        const routeTickets = tickets.filter(t => {
+          const routeCeps = r.ceps || [];
+          return routeCeps.some((rc: string) => (t.cep || '').startsWith(rc));
+        });
+        const routeRev = routeTickets.filter(t => t.status === 'Reversed').length;
+        return { ...r, ticketCount: routeTickets.length, revCount: routeRev };
+      })
+      .sort((a, b) => b.revCount - a.revCount);
+
+    parts.push(`\nROTAS (top 10 por reversões):`);
+    sortedRoutes.slice(0, 10).forEach(r => {
+      const driverCount = links.filter(l => l.route_id === r.id).length;
+      parts.push(`- ${r.name} | Grupo: ${r.route_group || '-'} | ${driverCount} mot | ${r.ticketCount} tix, ${r.revCount} rev`);
+    });
+  }
+
+  parts.push(`\nRESUMO: ${drivers.length} motoristas (${drivers.filter(d => d.is_active).length} ativos) | ${routes.length} rotas | ${links.length} vínculos`);
 
   return parts.join('\n');
 }
