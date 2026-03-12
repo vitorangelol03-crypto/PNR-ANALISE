@@ -346,16 +346,23 @@ const App: React.FC = () => {
         supabase.from('tickets').delete().neq('ticket_id', '0_ignore_internal'),
         supabase.from('route_mapping').delete().neq('spxtn', '0_ignore_internal'),
         supabase.from('city_cache').delete().neq('cep', '0_ignore_internal'),
-        supabase.from('driver_overrides').delete().neq('driver_name', '0_ignore_internal'),
         supabase.from('dashboard_meta').delete().neq('key', '0_ignore_internal')
       ]);
-      
+
       setAllData([]);
       setRouteMap({});
       setCityCache({});
-      setDriverOverrides({});
       setReferenceDate('');
-      location.reload();
+
+      const { data: driversData } = await supabase.from('drivers').select('name, fixed_route, is_excluded').order('name');
+      if (driversData) {
+        const o: Record<string, DriverOverride> = {};
+        driversData.forEach(row => {
+          o[row.name] = { route: row.fixed_route || "", isExcluded: !!row.is_excluded };
+        });
+        setDriverOverrides(o);
+        setKnownDrivers(driversData.map(row => row.name));
+      }
     } catch (err) {
       console.error(err);
     } finally {
