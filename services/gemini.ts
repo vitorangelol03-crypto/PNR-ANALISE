@@ -10,6 +10,7 @@ interface QueryIntent {
   wantsRoutes: boolean;
   wantsCeps: boolean;
   wantsDrivers: boolean;
+  wantsDriverRanking: boolean;
   wantsReasons: boolean;
   isSpecific: boolean;
 }
@@ -26,12 +27,13 @@ function classifyQuery(query: string, drivers: any[]): QueryIntent {
 
   const wantsRoutes = /rota|route|grupo|vinculo|vincul/.test(nq);
   const wantsCeps = /cep|regiao|area|bairro|cidade|endereco/.test(nq) || cepMatches.length > 0;
-  const wantsDrivers = /motorista|driver|ofensor|ranking|top|pior|melhor|desempenho|performance/.test(nq) || matchedDrivers.length > 0;
+  const wantsDriverRanking = /motorista|driver|ofensor|ranking|top|pior|melhor|desempenho|performance/.test(nq);
+  const wantsDrivers = wantsDriverRanking || matchedDrivers.length > 0;
   const wantsReasons = /motivo|razao|reason|rejeic|rejeit|porque|por que/.test(nq);
 
   const isSpecific = matchedDrivers.length > 0 || cepMatches.length > 0;
 
-  return { matchedDrivers, ceps: cepMatches, wantsRoutes, wantsCeps, wantsDrivers, wantsReasons, isSpecific };
+  return { matchedDrivers, ceps: cepMatches, wantsRoutes, wantsCeps, wantsDrivers, wantsDriverRanking, wantsReasons, isSpecific };
 }
 
 async function buildContext(userQuery: string): Promise<string> {
@@ -97,8 +99,7 @@ async function buildContext(userQuery: string): Promise<string> {
       }
     });
 
-    if (!intent.wantsDrivers) {
-      parts.push(`\nMOTORISTAS: ${drivers.length} cadastrados, ${drivers.filter(d => d.is_active).length} ativos`);
+    if (!intent.wantsDriverRanking && !intent.wantsRoutes && !intent.wantsCeps && !intent.wantsReasons) {
       return parts.join('\n');
     }
   }
@@ -118,13 +119,12 @@ async function buildContext(userQuery: string): Promise<string> {
       }
     });
 
-    if (!intent.wantsDrivers && !intent.wantsRoutes) {
-      parts.push(`\nMOTORISTAS: ${drivers.length} | ROTAS: ${routes.length}`);
+    if (!intent.wantsDriverRanking && !intent.wantsRoutes) {
       return parts.join('\n');
     }
   }
 
-  if (intent.wantsDrivers || !intent.isSpecific) {
+  if (intent.wantsDriverRanking || !intent.isSpecific) {
     const sortedDriverStats = [...driverStats.entries()].sort((a, b) => b[1].rev - a[1].rev);
     const limit = intent.isSpecific ? 5 : 10;
     parts.push(`\nTOP ${limit} MOTORISTAS POR REVERSÕES:`);
