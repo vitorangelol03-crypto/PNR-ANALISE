@@ -53,8 +53,8 @@ const AIAssistant: React.FC = () => {
   const responseRef = useRef<HTMLDivElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const responseAccumulator = useRef('');
-  const tooltipIndex = useRef(0);
-  const tooltipTimers = useRef<{ show?: ReturnType<typeof setTimeout>; hide?: ReturnType<typeof setTimeout>; next?: ReturnType<typeof setTimeout> }>({});
+  const tooltipIndex = useRef(-1);
+  const tooltipTimers = useRef<{ show?: ReturnType<typeof setTimeout>; hide?: ReturnType<typeof setTimeout>; next?: ReturnType<typeof setTimeout>; fade?: ReturnType<typeof setTimeout> }>({});
   const isOpenRef = useRef(isOpen);
   isOpenRef.current = isOpen;
 
@@ -77,11 +77,12 @@ const AIAssistant: React.FC = () => {
     if (tooltipTimers.current.show) clearTimeout(tooltipTimers.current.show);
     if (tooltipTimers.current.hide) clearTimeout(tooltipTimers.current.hide);
     if (tooltipTimers.current.next) clearTimeout(tooltipTimers.current.next);
+    if (tooltipTimers.current.fade) clearTimeout(tooltipTimers.current.fade);
   }, []);
 
   const hideTooltip = useCallback(() => {
     setTooltipVisible(false);
-    setTimeout(() => setShowTooltip(false), 300);
+    tooltipTimers.current.fade = setTimeout(() => setShowTooltip(false), 300);
   }, []);
 
   const scheduleTooltipRef = useRef<(delay: number) => void>(() => {});
