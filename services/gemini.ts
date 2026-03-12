@@ -171,15 +171,17 @@ export async function getFrequentSearches(limit = 5) {
   if (!data) return [];
 
   const counts = new Map<string, number>();
+  const original = new Map<string, string>();
   data.forEach(row => {
-    const q = row.query.trim().toLowerCase();
-    counts.set(q, (counts.get(q) || 0) + 1);
+    const key = row.query.trim().toLowerCase();
+    counts.set(key, (counts.get(key) || 0) + 1);
+    if (!original.has(key)) original.set(key, row.query.trim());
   });
 
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
-    .map(([query, count]) => ({ query, count }));
+    .map(([key, count]) => ({ query: original.get(key) || key, count }));
 }
 
 export async function clearSearchHistory(): Promise<void> {

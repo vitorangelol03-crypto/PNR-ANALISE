@@ -155,7 +155,7 @@ const AIAssistant: React.FC = () => {
                 </div>
                 <div>
                   <h2 className="text-white font-black text-sm uppercase tracking-wider">Assistente IA</h2>
-                  <p className="text-violet-200 text-[10px] font-medium">Gemini 2.5 Flash · Análise Logística</p>
+                  <p className="text-violet-200 text-[10px] font-medium">Gemini 2.5 Pro · Análise Logística</p>
                 </div>
               </div>
               <button onClick={() => setIsOpen(false)} className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white hover:bg-white/20 transition-colors">
