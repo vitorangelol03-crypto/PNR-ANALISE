@@ -77,7 +77,7 @@ const BancoDeRotas: React.FC = () => {
       const [groupsRes, routesRes, driversRes, linksRes] = await Promise.all([
         supabase.from('route_groups').select('*').order('group_name'),
         supabase.from('routes').select('*').order('name'),
-        supabase.from('drivers').select('*').eq('is_excluded', false).order('name'),
+        supabase.from('drivers').select('*').eq('is_excluded', false).eq('is_active', true).order('name'),
         supabase.from('driver_route_links').select('*'),
       ]);
       if (groupsRes.data) setGroups(groupsRes.data);
@@ -133,7 +133,7 @@ const BancoDeRotas: React.FC = () => {
           route: r,
           drivers: (linksByRoute.get(r.id) || []).sort((a, b) => a.name.localeCompare(b.name)),
         }));
-      if (groupRoutes.length > 0) {
+      if (filterGroup === 'all' || filterGroup === group.group_name) {
         result.push({ group, routes: groupRoutes });
       }
     });
@@ -153,8 +153,15 @@ const BancoDeRotas: React.FC = () => {
 
   const unlinkedDrivers = useMemo(() => {
     const linkedIds = new Set(links.map(l => l.driver_id));
-    return drivers.filter(d => !linkedIds.has(d.id) && !d.is_excluded);
-  }, [drivers, links]);
+    const normalizedSearch = searchTerm.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return drivers.filter(d => {
+      if (linkedIds.has(d.id) || d.is_excluded) return false;
+      if (normalizedSearch) {
+        return d.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(normalizedSearch);
+      }
+      return true;
+    });
+  }, [drivers, links, searchTerm]);
 
   const handleSaveNewRoute = async () => {
     if (!newRouteName.trim()) return;
@@ -570,6 +577,11 @@ const GroupSection: React.FC<{
       </div>
 
       <div className="p-4 md:p-6 space-y-4">
+        {routes.length === 0 && (
+          <div className="py-6 text-center">
+            <p className="text-xs font-bold text-gray-300 uppercase italic">Nenhuma rota neste grupo</p>
+          </div>
+        )}
         {routes.map(({ route, drivers: routeDrivers }) => (
           <WorkflowRow
             key={route.id}
