@@ -82,6 +82,48 @@ const BancoDeRotas: React.FC = () => {
   const [dragOverGroupName, setDragOverGroupName] = useState<string | null | undefined>(undefined);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+  const scrollRafRef = useRef<number | null>(null);
+  const scrollSpeedRef = useRef<number>(0);
+
+  useEffect(() => {
+    const EDGE_ZONE = 120;
+    const MAX_SPEED = 18;
+
+    const onDragOver = (e: DragEvent) => {
+      const y = e.clientY;
+      const h = window.innerHeight;
+      if (y < EDGE_ZONE) {
+        scrollSpeedRef.current = -MAX_SPEED * (1 - y / EDGE_ZONE);
+      } else if (y > h - EDGE_ZONE) {
+        scrollSpeedRef.current = MAX_SPEED * (1 - (h - y) / EDGE_ZONE);
+      } else {
+        scrollSpeedRef.current = 0;
+      }
+    };
+
+    const onDragEnd = () => {
+      scrollSpeedRef.current = 0;
+    };
+
+    const scroll = () => {
+      if (scrollSpeedRef.current !== 0) {
+        window.scrollBy(0, scrollSpeedRef.current);
+      }
+      scrollRafRef.current = requestAnimationFrame(scroll);
+    };
+
+    scrollRafRef.current = requestAnimationFrame(scroll);
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('dragend', onDragEnd);
+    window.addEventListener('drop', onDragEnd);
+
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('dragend', onDragEnd);
+      window.removeEventListener('drop', onDragEnd);
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+    };
+  }, []);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
