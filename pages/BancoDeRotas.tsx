@@ -82,46 +82,27 @@ const BancoDeRotas: React.FC = () => {
   const [dragOverGroupName, setDragOverGroupName] = useState<string | null | undefined>(undefined);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
-  const scrollRafRef = useRef<number | null>(null);
-  const scrollSpeedRef = useRef<number>(0);
+  const isDraggingRef = useRef(false);
 
   useEffect(() => {
-    const EDGE_ZONE = 150;
-    const MAX_SPEED = 40;
-
-    const onDragOver = (e: DragEvent) => {
-      const y = e.clientY;
-      const h = window.innerHeight;
-      if (y < EDGE_ZONE) {
-        scrollSpeedRef.current = -MAX_SPEED * (1 - y / EDGE_ZONE);
-      } else if (y > h - EDGE_ZONE) {
-        scrollSpeedRef.current = MAX_SPEED * (1 - (h - y) / EDGE_ZONE);
-      } else {
-        scrollSpeedRef.current = 0;
-      }
+    const onWheel = (e: WheelEvent) => {
+      if (!isDraggingRef.current) return;
+      e.preventDefault();
+      window.scrollBy({ top: e.deltaY, behavior: 'instant' as ScrollBehavior });
     };
+    const onDragStart = () => { isDraggingRef.current = true; };
+    const onDragEnd = () => { isDraggingRef.current = false; };
 
-    const onDragEnd = () => {
-      scrollSpeedRef.current = 0;
-    };
-
-    const scroll = () => {
-      if (scrollSpeedRef.current !== 0) {
-        window.scrollBy(0, scrollSpeedRef.current);
-      }
-      scrollRafRef.current = requestAnimationFrame(scroll);
-    };
-
-    scrollRafRef.current = requestAnimationFrame(scroll);
-    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('dragstart', onDragStart);
     window.addEventListener('dragend', onDragEnd);
     window.addEventListener('drop', onDragEnd);
+    window.addEventListener('wheel', onWheel, { passive: false });
 
     return () => {
-      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('dragstart', onDragStart);
       window.removeEventListener('dragend', onDragEnd);
       window.removeEventListener('drop', onDragEnd);
-      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+      window.removeEventListener('wheel', onWheel);
     };
   }, []);
 
