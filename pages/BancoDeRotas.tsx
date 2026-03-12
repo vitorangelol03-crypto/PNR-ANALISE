@@ -49,7 +49,17 @@ interface DragPayload {
   routeName?: string;
 }
 
+interface RadialMenuState {
+  origin: { x: number; y: number };
+  driverId: number;
+  driverName: string;
+  sourceRouteId?: string;
+  expandedGroup: string | null;
+  hoveredRouteId: string | null;
+}
+
 const DRAG_THRESHOLD = 6;
+const HOLD_DELAY = 350;
 
 const BancoDeRotas: React.FC = () => {
   const [groups, setGroups] = useState<RouteGroup[]>([]);
@@ -92,6 +102,10 @@ const BancoDeRotas: React.FC = () => {
   const isDraggingRef = useRef(false);
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const pendingClickRef = useRef<(() => void) | null>(null);
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdFiredRef = useRef(false);
+
+  const [radialMenu, setRadialMenu] = useState<RadialMenuState | null>(null);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
@@ -121,6 +135,14 @@ const BancoDeRotas: React.FC = () => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  useEffect(() => {
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && radialMenu) setRadialMenu(null);
+    };
+    window.addEventListener('keydown', onEscape);
+    return () => window.removeEventListener('keydown', onEscape);
+  }, [radialMenu]);
+
   const getDropTarget = (x: number, y: number) => {
     if (ghostRef.current) ghostRef.current.style.display = 'none';
     const els = document.elementsFromPoint(x, y);
@@ -132,6 +154,23 @@ const BancoDeRotas: React.FC = () => {
       groupName: groupEl ? (groupEl.getAttribute('data-drop-group') === '__none__' ? null : groupEl.getAttribute('data-drop-group')) : undefined,
     };
   };
+
+  const linkDriverToRoute = useCallback(async (driverId: number, driverName: string, targetRouteId: string, sourceRouteId?: string) => {
+    if (sourceRouteId === targetRouteId) return;
+    try {
+      if (sourceRouteId) {
+        const oldLink = links.find(l => l.driver_id === driverId && l.route_id === sourceRouteId);
+        if (oldLink) await supabase.from('driver_route_links').delete().eq('id', oldLink.id);
+      }
+      const alreadyLinked = links.some(l => l.driver_id === driverId && l.route_id === targetRouteId);
+      if (!alreadyLinked) {
+        await supabase.from('driver_route_links').insert({ driver_id: driverId, route_id: targetRouteId, is_primary: true });
+      }
+      const rName = routes.find(r => r.id === targetRouteId)?.name || 'rota';
+      showToast(sourceRouteId ? `🔄 ${driverName} movido para ${rName}` : `✅ ${driverName} vinculado a ${rName}`);
+      await loadData();
+    } catch { showToast('Erro ao vincular motorista', 'error'); }
+  }, [links, routes, loadData]);
 
   const onPointerDownDraggable = useCallback((
     e: React.PointerEvent,
@@ -145,11 +184,37 @@ const BancoDeRotas: React.FC = () => {
     dragStartPosRef.current = { x: e.clientX, y: e.clientY };
     isDraggingRef.current = false;
     pendingClickRef.current = onClick ?? null;
+    holdFiredRef.current = false;
+
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+
+    const isDriver = payload.type === 'driver' && payload.driverId != null;
+    const originX = e.clientX;
+    const originY = e.clientY;
+
+    if (isDriver && groups.length > 0) {
+      holdTimerRef.current = setTimeout(() => {
+        holdFiredRef.current = true;
+        pendingClickRef.current = null;
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        setRadialMenu({
+          origin: { x: originX, y: originY },
+          driverId: payload.driverId!,
+          driverName: payload.driverName || '',
+          sourceRouteId: payload.sourceRouteId,
+          expandedGroup: null,
+          hoveredRouteId: null,
+        });
+      }, HOLD_DELAY);
+    }
 
     const onMove = (me: PointerEvent) => {
       const dx = me.clientX - dragStartPosRef.current!.x;
       const dy = me.clientY - dragStartPosRef.current!.y;
       if (!isDraggingRef.current && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+
+      if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
 
       if (!isDraggingRef.current) {
         isDraggingRef.current = true;
@@ -174,8 +239,16 @@ const BancoDeRotas: React.FC = () => {
     const onUp = async (ue: PointerEvent) => {
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
+      if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
 
       if (ghostRef.current) { ghostRef.current.remove(); ghostRef.current = null; }
+
+      if (holdFiredRef.current) {
+        holdFiredRef.current = false;
+        dragPayloadRef.current = null;
+        dragStartPosRef.current = null;
+        return;
+      }
 
       if (!isDraggingRef.current) {
         pendingClickRef.current?.();
@@ -190,32 +263,19 @@ const BancoDeRotas: React.FC = () => {
       setDragOverGroupName(undefined);
 
       const { routeId, groupName } = getDropTarget(ue.clientX, ue.clientY);
-      const payload = dragPayloadRef.current;
+      const pl = dragPayloadRef.current;
       dragPayloadRef.current = null;
       dragStartPosRef.current = null;
-      if (!payload) return;
+      if (!pl) return;
 
-      if (payload.type === 'driver' && payload.driverId != null && routeId) {
-        if (payload.sourceRouteId === routeId) return;
-        try {
-          if (payload.sourceRouteId) {
-            const oldLink = links.find(l => l.driver_id === payload.driverId && l.route_id === payload.sourceRouteId);
-            if (oldLink) await supabase.from('driver_route_links').delete().eq('id', oldLink.id);
-          }
-          const alreadyLinked = links.some(l => l.driver_id === payload.driverId && l.route_id === routeId);
-          if (!alreadyLinked) {
-            await supabase.from('driver_route_links').insert({ driver_id: payload.driverId, route_id: routeId, is_primary: true });
-          }
-          const rName = routes.find(r => r.id === routeId)?.name || 'rota';
-          showToast(payload.sourceRouteId ? `🔄 ${payload.driverName} movido para ${rName}` : `✅ ${payload.driverName} vinculado a ${rName}`);
-          await loadData();
-        } catch { showToast('Erro ao vincular motorista', 'error'); }
-      } else if (payload.type === 'route' && payload.routeId && groupName !== undefined) {
-        const route = routes.find(r => r.id === payload.routeId);
+      if (pl.type === 'driver' && pl.driverId != null && routeId) {
+        await linkDriverToRoute(pl.driverId, pl.driverName || '', routeId, pl.sourceRouteId);
+      } else if (pl.type === 'route' && pl.routeId && groupName !== undefined) {
+        const route = routes.find(r => r.id === pl.routeId);
         if (!route || route.route_group === groupName) return;
         try {
-          await supabase.from('routes').update({ route_group: groupName }).eq('id', payload.routeId);
-          showToast(`📋 ${payload.routeName} movida para ${groupName ?? 'Sem Grupo'}`);
+          await supabase.from('routes').update({ route_group: groupName }).eq('id', pl.routeId);
+          showToast(`📋 ${pl.routeName} movida para ${groupName ?? 'Sem Grupo'}`);
           await loadData();
         } catch { showToast('Erro ao mover rota', 'error'); }
       }
@@ -223,7 +283,13 @@ const BancoDeRotas: React.FC = () => {
 
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
-  }, [links, routes, loadData]);
+  }, [links, routes, groups, loadData, linkDriverToRoute]);
+
+  const handleRadialRouteSelect = useCallback(async (targetRouteId: string) => {
+    if (!radialMenu) return;
+    setRadialMenu(null);
+    await linkDriverToRoute(radialMenu.driverId, radialMenu.driverName, targetRouteId, radialMenu.sourceRouteId);
+  }, [radialMenu, linkDriverToRoute]);
 
   const groupedData = useMemo(() => {
     const driverMap = new Map<number, Driver>();
@@ -376,7 +442,7 @@ const BancoDeRotas: React.FC = () => {
           </h1>
           <p className="text-[10px] md:text-xs text-gray-400 font-bold uppercase mt-1">
             {routes.length} rotas · {drivers.length} motoristas · {links.length} vínculos
-            <span className="ml-2 text-violet-400">· arraste motoristas para vincular</span>
+            <span className="ml-2 text-violet-400">· segure para atalho · arraste para vincular</span>
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
@@ -411,7 +477,7 @@ const BancoDeRotas: React.FC = () => {
             <h3 className="text-sm font-black text-amber-700 uppercase tracking-tight flex items-center gap-2">
               <span className="animate-pulse">⏳</span>
               Motoristas Aguardando Vinculação ({unlinkedDrivers.length})
-              <span className="text-[10px] font-normal text-amber-500 normal-case ml-1">— arraste até uma rota</span>
+              <span className="text-[10px] font-normal text-amber-500 normal-case ml-1">— segure para atalho ou arraste até uma rota</span>
             </h3>
           </div>
           <div className="p-4 md:p-5 flex flex-wrap gap-2">
@@ -420,7 +486,7 @@ const BancoDeRotas: React.FC = () => {
                 key={d.id}
                 onPointerDown={e => onPointerDownDraggable(e, { type: 'driver', driverId: d.id, driverName: d.name }, d.name)}
                 className="px-3 py-1.5 bg-white border-2 border-amber-300 rounded-lg text-[10px] md:text-xs font-bold text-amber-800 uppercase cursor-grab active:cursor-grabbing hover:bg-amber-50 hover:shadow-md transition-all touch-none"
-                title="Arraste até uma rota para vincular"
+                title="Segure para atalho · Arraste para vincular"
               >
                 ✋ {d.name}
               </div>
@@ -441,6 +507,17 @@ const BancoDeRotas: React.FC = () => {
           onPointerDownDraggable={onPointerDownDraggable}
         />
       ))}
+
+      {radialMenu && (
+        <RadialMenu
+          menu={radialMenu}
+          groups={groups}
+          routes={routes}
+          onSelectRoute={handleRadialRouteSelect}
+          onUpdateMenu={setRadialMenu}
+          onDismiss={() => setRadialMenu(null)}
+        />
+      )}
 
       {showNewRouteModal && (
         <Modal onClose={() => setShowNewRouteModal(false)} title="Nova Rota">
@@ -565,6 +642,133 @@ const BancoDeRotas: React.FC = () => {
           </div>
         </Modal>
       )}
+    </div>
+  );
+};
+
+const RadialMenu: React.FC<{
+  menu: RadialMenuState;
+  groups: RouteGroup[];
+  routes: Route[];
+  onSelectRoute: (routeId: string) => void;
+  onUpdateMenu: (m: RadialMenuState) => void;
+  onDismiss: () => void;
+}> = ({ menu, groups, routes, onSelectRoute, onUpdateMenu, onDismiss }) => {
+  const BUBBLE_RADIUS = 100;
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const groupBubbles = useMemo(() => {
+    const n = groups.length;
+    if (n === 0) return [];
+
+    const startAngle = Math.PI * 0.3;
+    const endAngle = Math.PI * 0.7;
+    const step = n > 1 ? (endAngle - startAngle) / (n - 1) : 0;
+
+    return groups.map((g, i) => {
+      const angle = n > 1 ? startAngle + step * i : Math.PI * 0.5;
+      const x = Math.cos(angle) * BUBBLE_RADIUS;
+      const y = Math.sin(angle) * BUBBLE_RADIUS;
+      const groupRoutes = routes.filter(r => r.route_group === g.group_name).sort((a, b) => a.name.localeCompare(b.name));
+      return { group: g, x, y, routes: groupRoutes };
+    });
+  }, [groups, routes]);
+
+  const clampedOrigin = useMemo(() => {
+    const pad = 200;
+    return {
+      x: Math.max(pad, Math.min(window.innerWidth - pad, menu.origin.x)),
+      y: Math.max(60, Math.min(window.innerHeight - 250, menu.origin.y)),
+    };
+  }, [menu.origin]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="fixed inset-0 z-[250]"
+      onClick={e => { if (e.target === containerRef.current) onDismiss(); }}
+      style={{ background: 'radial-gradient(circle at center, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.4) 100%)' }}
+    >
+      <div
+        className="absolute text-center pointer-events-none"
+        style={{ left: clampedOrigin.x, top: clampedOrigin.y, transform: 'translate(-50%, -50%)' }}
+      >
+        <div className="px-4 py-2 bg-white/95 backdrop-blur rounded-xl shadow-lg border border-gray-200 inline-block">
+          <p className="text-[10px] font-black text-gray-500 uppercase tracking-wide">Vincular: {menu.driverName}</p>
+          <p className="text-[8px] font-bold text-gray-400 mt-0.5">Escolha o grupo e a rota</p>
+        </div>
+      </div>
+
+      {groupBubbles.map(({ group, x, y, routes: groupRoutes }, idx) => {
+        const isExpanded = menu.expandedGroup === group.group_name;
+        const isOther = menu.expandedGroup !== null && !isExpanded;
+        const bx = clampedOrigin.x + x;
+        const by = clampedOrigin.y + y + 50;
+
+        return (
+          <div key={group.id} style={{ position: 'absolute', left: bx, top: by, transform: 'translate(-50%, -50%)', zIndex: isExpanded ? 10 : 5 }}>
+            <div
+              onClick={() => onUpdateMenu({ ...menu, expandedGroup: isExpanded ? null : group.group_name, hoveredRouteId: null })}
+              className="flex flex-col items-center justify-center rounded-full cursor-pointer transition-all duration-300 border-2 shadow-lg hover:shadow-xl hover:scale-110"
+              style={{
+                width: isExpanded ? 90 : 80,
+                height: isExpanded ? 90 : 80,
+                backgroundColor: group.color,
+                borderColor: `${group.color}cc`,
+                opacity: isOther ? 0.4 : 1,
+                transform: `scale(${isOther ? 0.85 : 1})`,
+                animationDelay: `${idx * 60}ms`,
+              }}
+            >
+              <span className="text-white font-black text-[11px] md:text-xs uppercase tracking-tight text-center px-1 leading-tight">
+                {group.group_name}
+              </span>
+              <span className="text-white/70 text-[8px] font-bold mt-0.5">{groupRoutes.length} rotas</span>
+            </div>
+
+            {isExpanded && groupRoutes.length > 0 && (
+              <div
+                className="absolute left-1/2 -translate-x-1/2 mt-3 bg-white rounded-2xl shadow-2xl border overflow-hidden min-w-[180px] max-w-[260px] max-h-[220px] overflow-y-auto"
+                style={{ borderColor: `${group.color}40`, top: '100%' }}
+              >
+                <div className="p-2 border-b text-center" style={{ backgroundColor: `${group.color}15`, borderColor: `${group.color}30` }}>
+                  <p className="text-[9px] font-black uppercase" style={{ color: group.color }}>{group.group_name}</p>
+                </div>
+                <div className="p-2 space-y-1">
+                  {groupRoutes.map(r => (
+                    <button
+                      key={r.id}
+                      onClick={() => onSelectRoute(r.id)}
+                      onMouseEnter={() => onUpdateMenu({ ...menu, hoveredRouteId: r.id })}
+                      onMouseLeave={() => onUpdateMenu({ ...menu, hoveredRouteId: null })}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-[10px] md:text-xs font-bold uppercase transition-all border ${
+                        menu.hoveredRouteId === r.id
+                          ? 'shadow-md scale-[1.02]'
+                          : 'bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                      }`}
+                      style={menu.hoveredRouteId === r.id ? { backgroundColor: `${group.color}15`, borderColor: `${group.color}50`, color: group.color } : { color: '#374151' }}
+                    >
+                      {r.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {isExpanded && groupRoutes.length === 0 && (
+              <div className="absolute left-1/2 -translate-x-1/2 mt-3 bg-white rounded-xl shadow-lg border border-gray-200 px-4 py-3" style={{ top: '100%' }}>
+                <p className="text-[10px] font-bold text-gray-400 italic whitespace-nowrap">Nenhuma rota neste grupo</p>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <button
+        onClick={onDismiss}
+        className="fixed top-4 right-4 w-10 h-10 bg-white/90 backdrop-blur rounded-full shadow-lg flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-white transition-all text-lg font-bold"
+      >
+        ✕
+      </button>
     </div>
   );
 };
@@ -694,10 +898,7 @@ const WorkflowRow: React.FC<{
         ref={routeRef}
         data-drop-route-id={route.id}
         onPointerDown={e => onPointerDownDraggable(
-          e,
-          { type: 'route', routeId: route.id, routeName: route.name },
-          route.name,
-          () => onRouteClick(route),
+          e, { type: 'route', routeId: route.id, routeName: route.name }, route.name, () => onRouteClick(route),
         )}
         className={`relative z-10 shrink-0 w-48 md:w-56 p-3 md:p-4 rounded-xl border-2 bg-white shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group touch-none ${isDragOver ? 'ring-2 ring-offset-1 scale-105' : ''}`}
         style={{
@@ -746,13 +947,11 @@ const WorkflowRow: React.FC<{
               key={d.id}
               ref={el => { driverRefs.current[i] = el; }}
               onPointerDown={e => onPointerDownDraggable(
-                e,
-                { type: 'driver', driverId: d.id, driverName: d.name, sourceRouteId: route.id },
-                d.name,
+                e, { type: 'driver', driverId: d.id, driverName: d.name, sourceRouteId: route.id }, d.name,
               )}
               className="px-3 py-2 bg-white border rounded-lg shadow-sm hover:shadow cursor-grab active:cursor-grabbing transition-all touch-none"
               style={{ borderColor: `${color}30` }}
-              title="Arraste para mover para outra rota"
+              title="Segure para atalho · Arraste para mover"
             >
               <span className="text-[10px] md:text-xs font-bold text-gray-700 uppercase">{d.name}</span>
             </div>
