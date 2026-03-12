@@ -10,7 +10,7 @@ A professional corporate dashboard for analyzing IHS tickets from CSV and Excel 
 - **Routing**: React Router v6
 - **File Parsing**: PapaParse (CSV), xlsx (Excel)
 - **Backend/DB**: Supabase (PostgreSQL)
-- **AI**: Google Gemini 2.5 Flash via @google/generative-ai SDK
+- **AI**: Google Gemini 2.5 Pro via @google/generative-ai SDK (server-side, SSE streaming)
 - **Markdown**: react-markdown for AI response rendering
 - **Language**: Portuguese (pt-BR)
 
@@ -42,8 +42,12 @@ A professional corporate dashboard for analyzing IHS tickets from CSV and Excel 
 ## AI Assistant
 - Floating violet button (bottom-right) opens a side panel on any page
 - Two tabs: Chat (query + response) and Histórico (search history)
-- Queries Supabase for full context (tickets, drivers, routes, links, mappings) and sends to Gemini 2.5 Flash
-- Responses rendered as Markdown with styled tables, headings, lists
+- **Streaming**: Server uses SSE (generateContentStream) for real-time token-by-token delivery; frontend renders progressively with blinking cursor
+- **Smart Context**: Query-aware context building — detects driver names, CEPs in queries; sends top 15 drivers by reversals, top 10 CEPs, top 5 reasons; only includes route details when query mentions "rota"
+- **Concise Responses**: System prompt enforces max 300 words, no preambles, direct answers with emoji status indicators
+- Queries Supabase for context and sends to Gemini 2.5 Pro via Express server (port 3001)
+- Vite proxies `/api` → `http://localhost:3001`; `npm run dev` runs both via concurrently
+- Responses rendered as Markdown with styled tables, headings, lists (remark-gfm)
 - Autocomplete suggestions from search_history as user types
 - "Salvar Relatório" saves query+response to ai_reports table
 - Recent searches (last 20) and frequent searches (top 5) shown
@@ -78,5 +82,5 @@ A professional corporate dashboard for analyzing IHS tickets from CSV and Excel 
 ## Key Configuration
 - Vite dev server: port 5000, host 0.0.0.0, allowedHosts: true (for Replit proxy)
 - Supabase URL: hardcoded fallback in supabase.ts (uses anon key, no service role key exposed)
-- GEMINI_API_KEY passed to frontend via vite.config.ts define
+- GEMINI_API_KEY used server-side only in server.cjs (NOT exposed to frontend)
 - Admin password: `684171` (sessionStorage key: `ihs_admin`)

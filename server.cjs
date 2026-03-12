@@ -7,28 +7,22 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
-const SYSTEM_PROMPT = `Você é um analista de logística especializado em operações PNR (Prova de Não Recebimento) da IHS.
-Você analisa tickets de entrega, motoristas, rotas e métricas operacionais.
+const SYSTEM_PROMPT = `Você é um analista de logística PNR (Prova de Não Recebimento) da IHS. Responda SEMPRE em português brasileiro.
 
-REGRAS:
-- Responda SEMPRE em português brasileiro
-- Use tabelas Markdown para comparações e listagens
-- Destaque ofensores (motoristas com muitas reversões ou valores altos de PNR) em **negrito**
-- Compare rotas e motoristas quando relevante
-- Indique tendências e alertas operacionais
-- Use emojis para indicadores: 🔴 crítico, 🟡 atenção, 🟢 bom
-- Formate valores monetários como R$ X.XXX,XX
-- Seja direto e objetivo nas análises
-- Se não houver dados suficientes, informe claramente
-- Quando mencionar motoristas problemáticos, liste suas rotas e valores
+FORMATO OBRIGATÓRIO:
+- Máximo 300 palavras
+- Vá direto ao ponto, SEM introduções genéricas ("Vamos analisar...", "Com base nos dados...")
+- Comece pela resposta/conclusão principal
+- Tabelas Markdown com no máximo 10 linhas
+- Use emojis de status: 🔴 crítico, 🟡 atenção, 🟢 bom
+- Valores monetários: R$ X.XXX,XX
+- Destaque ofensores em **negrito**
+- Se não houver dados, diga "Sem dados disponíveis para esta análise."
 
-CONTEXTO DO SISTEMA:
-- Tickets com status "ForBilling" = faturados (positivo)
-- Tickets com status "Reversed" = revertidos (negativo/problema)
+CONTEXTO:
+- "ForBilling" = faturado (positivo) | "Reversed" = revertido (problema)
 - PNR = Prova de Não Recebimento
-- Cada ticket tem: ticketId, driver, station, pnrValue, status, cep, rejectionReason
-- Motoristas podem ter rotas fixas atribuídas
-- route_mapping mapeia CEPs para nomes de rotas`;
+- Motoristas têm rotas fixas e vínculos com rotas`;
 
 app.post('/api/gemini', async (req, res) => {
   try {
@@ -45,19 +39,32 @@ app.post('/api/gemini', async (req, res) => {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
 
-    const prompt = `${SYSTEM_PROMPT}\n\n--- DADOS ATUAIS DO SISTEMA ---\n${context || 'Sem dados disponíveis'}\n--- FIM DOS DADOS ---\n\nPERGUNTA DO USUÁRIO: ${query}`;
+    const prompt = `${SYSTEM_PROMPT}\n\n--- DADOS ---\n${context || 'Sem dados'}\n---\n\nPERGUNTA: ${query}`;
 
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const text = response.text();
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
 
-    const tableMatches = text.match(/\|.*\|/g);
-    const resultsCount = tableMatches ? tableMatches.length : 1;
+    const result = await model.generateContentStream(prompt);
 
-    res.json({ response: text, resultsCount });
+    for await (const chunk of result.stream) {
+      const text = chunk.text();
+      if (text) {
+        res.write(`data: ${JSON.stringify({ text })}\n\n`);
+      }
+    }
+
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
   } catch (err) {
     console.error('Gemini API error:', err.message);
-    res.status(500).json({ error: err.message || 'Erro interno do servidor.' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message || 'Erro interno do servidor.' });
+    } else {
+      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+      res.end();
+    }
   }
 });
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  queryGemini,
+  queryGeminiStream,
   saveToSearchHistory,
   saveAIReport,
   getRecentSearches,
@@ -29,7 +29,7 @@ const AIAssistant: React.FC = () => {
   const [query, setQuery] = useState('');
   const [response, setResponse] = useState('');
   const [currentQuery, setCurrentQuery] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState('');
   const [savedReport, setSavedReport] = useState(false);
   const [savingReport, setSavingReport] = useState(false);
@@ -43,6 +43,7 @@ const AIAssistant: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null);
   const responseRef = useRef<HTMLDivElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
+  const responseAccumulator = useRef('');
 
   const loadHistory = useCallback(async () => {
     const [recent, frequent] = await Promise.all([
@@ -69,6 +70,12 @@ const AIAssistant: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (streaming && responseRef.current) {
+      responseRef.current.scrollTop = responseRef.current.scrollHeight;
+    }
+  }, [response, streaming]);
+
   const handleInputChange = async (value: string) => {
     setQuery(value);
     if (value.trim().length >= 2) {
@@ -84,23 +91,37 @@ const AIAssistant: React.FC = () => {
   const executeQuery = async (q: string) => {
     if (!q.trim()) return;
     setQuery(q);
-    setLoading(true);
+    setStreaming(true);
     setError('');
     setResponse('');
     setSavedReport(false);
     setCurrentQuery(q);
     setShowSuggestions(false);
     setActiveTab('chat');
+    responseAccumulator.current = '';
 
     try {
-      const result = await queryGemini(q);
-      setResponse(result.response);
-      await saveToSearchHistory(q, result.resultsCount);
-      await loadHistory();
+      await queryGeminiStream(
+        q,
+        (chunk) => {
+          responseAccumulator.current += chunk;
+          setResponse(responseAccumulator.current);
+        },
+        async () => {
+          setStreaming(false);
+          const tableMatches = responseAccumulator.current.match(/\|.*\|/g);
+          const resultsCount = tableMatches ? tableMatches.length : 1;
+          await saveToSearchHistory(q, resultsCount);
+          await loadHistory();
+        },
+        (errMsg) => {
+          setStreaming(false);
+          setError(errMsg);
+        }
+      );
     } catch (err: any) {
       setError(err.message || 'Erro ao consultar o assistente IA.');
-    } finally {
-      setLoading(false);
+      setStreaming(false);
     }
   };
 
@@ -129,6 +150,9 @@ const AIAssistant: React.FC = () => {
     e.preventDefault();
     executeQuery(query);
   };
+
+  const isLoading = streaming && !response;
+  const hasResponse = response.length > 0;
 
   return (
     <>
@@ -192,14 +216,14 @@ const AIAssistant: React.FC = () => {
                         onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
                         placeholder="Pergunte sobre motoristas, rotas, tickets..."
                         className="w-full pl-4 pr-24 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-medium outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition-all"
-                        disabled={loading}
+                        disabled={streaming}
                       />
                       <button
                         type="submit"
-                        disabled={loading || !query.trim()}
+                        disabled={streaming || !query.trim()}
                         className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider hover:shadow-lg hover:shadow-violet-300/50 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        {loading ? '...' : 'Analisar'}
+                        {streaming ? '...' : 'Analisar'}
                       </button>
 
                       {showSuggestions && suggestions.length > 0 && (
@@ -220,7 +244,7 @@ const AIAssistant: React.FC = () => {
                     </div>
                   </form>
 
-                  {!loading && !response && !error && (
+                  {!streaming && !hasResponse && !error && (
                     <div className="space-y-3">
                       <div className="bg-gradient-to-br from-violet-50 to-indigo-50 rounded-2xl p-4 border border-violet-100">
                         <p className="text-[10px] font-black text-violet-600 uppercase tracking-wider mb-3">Sugestões de análise</p>
@@ -263,17 +287,14 @@ const AIAssistant: React.FC = () => {
                     </div>
                   )}
 
-                  {loading && (
-                    <div className="flex flex-col items-center justify-center py-12 gap-4">
-                      <div className="w-12 h-12 bg-gradient-to-br from-violet-100 to-indigo-100 rounded-2xl flex items-center justify-center animate-pulse">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-violet-600 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
+                  {isLoading && (
+                    <div className="flex items-center gap-3 py-4">
+                      <div className="flex gap-1">
+                        <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                        <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                        <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
                       </div>
-                      <div className="text-center">
-                        <p className="text-xs font-black text-gray-600 uppercase">Analisando dados...</p>
-                        <p className="text-[10px] text-gray-400 mt-1">Consultando tickets, motoristas e rotas</p>
-                      </div>
+                      <p className="text-xs font-bold text-gray-400">Preparando análise...</p>
                     </div>
                   )}
 
@@ -283,9 +304,9 @@ const AIAssistant: React.FC = () => {
                     </div>
                   )}
 
-                  {response && (
+                  {hasResponse && (
                     <div className="space-y-3">
-                      <div ref={responseRef} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+                      <div ref={responseRef} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm max-h-[60vh] overflow-y-auto">
                         <div className="prose prose-sm max-w-none text-gray-700 overflow-x-auto ai-response">
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
@@ -308,35 +329,41 @@ const AIAssistant: React.FC = () => {
                           >
                             {response}
                           </ReactMarkdown>
+                          {streaming && (
+                            <span className="inline-block w-1.5 h-4 bg-violet-500 animate-pulse ml-0.5 rounded-sm align-middle" />
+                          )}
                         </div>
                       </div>
 
-                      <div className="flex gap-2">
-                        <button
-                          onClick={handleSaveReport}
-                          disabled={savingReport || savedReport}
-                          className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
-                            savedReport
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100'
-                          } disabled:opacity-60`}
-                        >
-                          {savedReport ? '✅ Relatório Salvo' : savingReport ? 'Salvando...' : '💾 Salvar Relatório'}
-                        </button>
-                        <button
-                          onClick={() => {
-                            setResponse('');
-                            setCurrentQuery('');
-                            setQuery('');
-                            setError('');
-                            setSavedReport(false);
-                            inputRef.current?.focus();
-                          }}
-                          className="px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100 transition-all"
-                        >
-                          Nova Busca
-                        </button>
-                      </div>
+                      {!streaming && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleSaveReport}
+                            disabled={savingReport || savedReport}
+                            className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                              savedReport
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100'
+                            } disabled:opacity-60`}
+                          >
+                            {savedReport ? '✅ Relatório Salvo' : savingReport ? 'Salvando...' : '💾 Salvar Relatório'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setResponse('');
+                              setCurrentQuery('');
+                              setQuery('');
+                              setError('');
+                              setSavedReport(false);
+                              responseAccumulator.current = '';
+                              inputRef.current?.focus();
+                            }}
+                            className="px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100 transition-all"
+                          >
+                            Nova Busca
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
