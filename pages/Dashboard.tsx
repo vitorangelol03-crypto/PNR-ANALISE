@@ -427,6 +427,10 @@ const Dashboard: React.FC = () => {
     return map;
   }, [stats.filtered]);
 
+  useEffect(() => {
+    setOpenTrackingDrawer(null);
+  }, [searchTerm, selectedStatus, selectedRouteFilter, performanceSearch]);
+
   const totals = useMemo(() => {
     const faturadosItems = stats.filtered.filter(i => i.status === TicketStatus.ForBilling);
     return {
