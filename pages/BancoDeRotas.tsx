@@ -59,7 +59,7 @@ interface RadialMenuState {
 }
 
 const DRAG_THRESHOLD = 6;
-const HOLD_DELAY = 350;
+const HOLD_DELAY = 300;
 
 const BancoDeRotas: React.FC = () => {
   const [groups, setGroups] = useState<RouteGroup[]>([]);
@@ -172,6 +172,8 @@ const BancoDeRotas: React.FC = () => {
     } catch { showToast('Erro ao vincular motorista', 'error'); }
   }, [links, routes, loadData]);
 
+  const radialPayloadRef = useRef<{ driverId: number; driverName: string; sourceRouteId?: string } | null>(null);
+
   const onPointerDownDraggable = useCallback((
     e: React.PointerEvent,
     payload: DragPayload,
@@ -196,8 +198,7 @@ const BancoDeRotas: React.FC = () => {
       holdTimerRef.current = setTimeout(() => {
         holdFiredRef.current = true;
         pendingClickRef.current = null;
-        document.removeEventListener('pointermove', onMove);
-        document.removeEventListener('pointerup', onUp);
+        radialPayloadRef.current = { driverId: payload.driverId!, driverName: payload.driverName || '', sourceRouteId: payload.sourceRouteId };
         setRadialMenu({
           origin: { x: originX, y: originY },
           driverId: payload.driverId!,
@@ -210,6 +211,23 @@ const BancoDeRotas: React.FC = () => {
     }
 
     const onMove = (me: PointerEvent) => {
+      if (holdFiredRef.current) {
+        const els = document.elementsFromPoint(me.clientX, me.clientY);
+        const groupEl = els.find(el => el.hasAttribute('data-radial-group'));
+        const routeEl = els.find(el => el.hasAttribute('data-radial-route-id'));
+
+        if (groupEl) {
+          const gName = groupEl.getAttribute('data-radial-group');
+          setRadialMenu(prev => prev ? { ...prev, expandedGroup: gName, hoveredRouteId: null } : null);
+        } else if (routeEl) {
+          const rId = routeEl.getAttribute('data-radial-route-id');
+          setRadialMenu(prev => prev ? { ...prev, hoveredRouteId: rId } : null);
+        } else {
+          setRadialMenu(prev => prev ? { ...prev, hoveredRouteId: null } : null);
+        }
+        return;
+      }
+
       const dx = me.clientX - dragStartPosRef.current!.x;
       const dy = me.clientY - dragStartPosRef.current!.y;
       if (!isDraggingRef.current && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
@@ -241,14 +259,25 @@ const BancoDeRotas: React.FC = () => {
       document.removeEventListener('pointerup', onUp);
       if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
 
-      if (ghostRef.current) { ghostRef.current.remove(); ghostRef.current = null; }
-
       if (holdFiredRef.current) {
         holdFiredRef.current = false;
+        const rp = radialPayloadRef.current;
+        radialPayloadRef.current = null;
         dragPayloadRef.current = null;
         dragStartPosRef.current = null;
+
+        const els = document.elementsFromPoint(ue.clientX, ue.clientY);
+        const routeEl = els.find(el => el.hasAttribute('data-radial-route-id'));
+        setRadialMenu(null);
+
+        if (routeEl && rp) {
+          const targetRouteId = routeEl.getAttribute('data-radial-route-id')!;
+          await linkDriverToRoute(rp.driverId, rp.driverName, targetRouteId, rp.sourceRouteId);
+        }
         return;
       }
+
+      if (ghostRef.current) { ghostRef.current.remove(); ghostRef.current = null; }
 
       if (!isDraggingRef.current) {
         pendingClickRef.current?.();
@@ -285,11 +314,6 @@ const BancoDeRotas: React.FC = () => {
     document.addEventListener('pointerup', onUp);
   }, [links, routes, groups, loadData, linkDriverToRoute]);
 
-  const handleRadialRouteSelect = useCallback(async (targetRouteId: string) => {
-    if (!radialMenu) return;
-    setRadialMenu(null);
-    await linkDriverToRoute(radialMenu.driverId, radialMenu.driverName, targetRouteId, radialMenu.sourceRouteId);
-  }, [radialMenu, linkDriverToRoute]);
 
   const groupedData = useMemo(() => {
     const driverMap = new Map<number, Driver>();
@@ -513,9 +537,6 @@ const BancoDeRotas: React.FC = () => {
           menu={radialMenu}
           groups={groups}
           routes={routes}
-          onSelectRoute={handleRadialRouteSelect}
-          onUpdateMenu={setRadialMenu}
-          onDismiss={() => setRadialMenu(null)}
         />
       )}
 
@@ -650,21 +671,15 @@ const RadialMenu: React.FC<{
   menu: RadialMenuState;
   groups: RouteGroup[];
   routes: Route[];
-  onSelectRoute: (routeId: string) => void;
-  onUpdateMenu: (m: RadialMenuState) => void;
-  onDismiss: () => void;
-}> = ({ menu, groups, routes, onSelectRoute, onUpdateMenu, onDismiss }) => {
+}> = ({ menu, groups, routes }) => {
   const BUBBLE_RADIUS = 100;
-  const containerRef = useRef<HTMLDivElement>(null);
 
   const groupBubbles = useMemo(() => {
     const n = groups.length;
     if (n === 0) return [];
-
     const startAngle = Math.PI * 0.3;
     const endAngle = Math.PI * 0.7;
     const step = n > 1 ? (endAngle - startAngle) / (n - 1) : 0;
-
     return groups.map((g, i) => {
       const angle = n > 1 ? startAngle + step * i : Math.PI * 0.5;
       const x = Math.cos(angle) * BUBBLE_RADIUS;
@@ -684,9 +699,7 @@ const RadialMenu: React.FC<{
 
   return (
     <div
-      ref={containerRef}
-      className="fixed inset-0 z-[250]"
-      onClick={e => { if (e.target === containerRef.current) onDismiss(); }}
+      className="fixed inset-0 z-[250] pointer-events-none"
       style={{ background: 'radial-gradient(circle at center, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.4) 100%)' }}
     >
       <div
@@ -695,11 +708,11 @@ const RadialMenu: React.FC<{
       >
         <div className="px-4 py-2 bg-white/95 backdrop-blur rounded-xl shadow-lg border border-gray-200 inline-block">
           <p className="text-[10px] font-black text-gray-500 uppercase tracking-wide">Vincular: {menu.driverName}</p>
-          <p className="text-[8px] font-bold text-gray-400 mt-0.5">Escolha o grupo e a rota</p>
+          <p className="text-[8px] font-bold text-gray-400 mt-0.5">Arraste até o grupo e solte na rota</p>
         </div>
       </div>
 
-      {groupBubbles.map(({ group, x, y, routes: groupRoutes }, idx) => {
+      {groupBubbles.map(({ group, x, y, routes: groupRoutes }) => {
         const isExpanded = menu.expandedGroup === group.group_name;
         const isOther = menu.expandedGroup !== null && !isExpanded;
         const bx = clampedOrigin.x + x;
@@ -708,8 +721,8 @@ const RadialMenu: React.FC<{
         return (
           <div key={group.id} style={{ position: 'absolute', left: bx, top: by, transform: 'translate(-50%, -50%)', zIndex: isExpanded ? 10 : 5 }}>
             <div
-              onClick={() => onUpdateMenu({ ...menu, expandedGroup: isExpanded ? null : group.group_name, hoveredRouteId: null })}
-              className="flex flex-col items-center justify-center rounded-full cursor-pointer transition-all duration-300 border-2 shadow-lg hover:shadow-xl hover:scale-110"
+              data-radial-group={group.group_name}
+              className="flex flex-col items-center justify-center rounded-full transition-all duration-300 border-2 shadow-lg pointer-events-auto"
               style={{
                 width: isExpanded ? 90 : 80,
                 height: isExpanded ? 90 : 80,
@@ -717,45 +730,42 @@ const RadialMenu: React.FC<{
                 borderColor: `${group.color}cc`,
                 opacity: isOther ? 0.4 : 1,
                 transform: `scale(${isOther ? 0.85 : 1})`,
-                animationDelay: `${idx * 60}ms`,
               }}
             >
-              <span className="text-white font-black text-[11px] md:text-xs uppercase tracking-tight text-center px-1 leading-tight">
+              <span className="text-white font-black text-[11px] md:text-xs uppercase tracking-tight text-center px-1 leading-tight pointer-events-none">
                 {group.group_name}
               </span>
-              <span className="text-white/70 text-[8px] font-bold mt-0.5">{groupRoutes.length} rotas</span>
+              <span className="text-white/70 text-[8px] font-bold mt-0.5 pointer-events-none">{groupRoutes.length} rotas</span>
             </div>
 
             {isExpanded && groupRoutes.length > 0 && (
               <div
-                className="absolute left-1/2 -translate-x-1/2 mt-3 bg-white rounded-2xl shadow-2xl border overflow-hidden min-w-[180px] max-w-[260px] max-h-[220px] overflow-y-auto"
+                className="absolute left-1/2 -translate-x-1/2 mt-3 bg-white rounded-2xl shadow-2xl border overflow-hidden min-w-[180px] max-w-[260px] max-h-[220px] overflow-y-auto pointer-events-auto"
                 style={{ borderColor: `${group.color}40`, top: '100%' }}
               >
-                <div className="p-2 border-b text-center" style={{ backgroundColor: `${group.color}15`, borderColor: `${group.color}30` }}>
+                <div className="p-2 border-b text-center pointer-events-none" style={{ backgroundColor: `${group.color}15`, borderColor: `${group.color}30` }}>
                   <p className="text-[9px] font-black uppercase" style={{ color: group.color }}>{group.group_name}</p>
                 </div>
                 <div className="p-2 space-y-1">
                   {groupRoutes.map(r => (
-                    <button
+                    <div
                       key={r.id}
-                      onClick={() => onSelectRoute(r.id)}
-                      onMouseEnter={() => onUpdateMenu({ ...menu, hoveredRouteId: r.id })}
-                      onMouseLeave={() => onUpdateMenu({ ...menu, hoveredRouteId: null })}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-[10px] md:text-xs font-bold uppercase transition-all border ${
+                      data-radial-route-id={r.id}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-[10px] md:text-xs font-bold uppercase transition-all border pointer-events-auto ${
                         menu.hoveredRouteId === r.id
                           ? 'shadow-md scale-[1.02]'
-                          : 'bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                          : 'bg-white border-gray-100'
                       }`}
                       style={menu.hoveredRouteId === r.id ? { backgroundColor: `${group.color}15`, borderColor: `${group.color}50`, color: group.color } : { color: '#374151' }}
                     >
                       {r.name}
-                    </button>
+                    </div>
                   ))}
                 </div>
               </div>
             )}
             {isExpanded && groupRoutes.length === 0 && (
-              <div className="absolute left-1/2 -translate-x-1/2 mt-3 bg-white rounded-xl shadow-lg border border-gray-200 px-4 py-3" style={{ top: '100%' }}>
+              <div className="absolute left-1/2 -translate-x-1/2 mt-3 bg-white rounded-xl shadow-lg border border-gray-200 px-4 py-3 pointer-events-none" style={{ top: '100%' }}>
                 <p className="text-[10px] font-bold text-gray-400 italic whitespace-nowrap">Nenhuma rota neste grupo</p>
               </div>
             )}
@@ -763,12 +773,9 @@ const RadialMenu: React.FC<{
         );
       })}
 
-      <button
-        onClick={onDismiss}
-        className="fixed top-4 right-4 w-10 h-10 bg-white/90 backdrop-blur rounded-full shadow-lg flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-white transition-all text-lg font-bold"
-      >
-        ✕
-      </button>
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-2 bg-white/90 backdrop-blur rounded-xl shadow-lg pointer-events-none">
+        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Solte em área vazia para cancelar · ESC para fechar</p>
+      </div>
     </div>
   );
 };
