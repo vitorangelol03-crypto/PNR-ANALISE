@@ -249,7 +249,11 @@ const BancoDeRotas: React.FC = () => {
           const rId = routeEl.getAttribute('data-radial-route-id');
           setRadialMenu(prev => prev ? { ...prev, hoveredRouteId: rId } : null);
         } else {
-          setRadialMenu(prev => prev ? { ...prev, hoveredRouteId: null } : null);
+          setRadialMenu(prev => {
+            if (!prev) return null;
+            if (prev.mode === 'route') return { ...prev, expandedGroup: null, hoveredRouteId: null };
+            return { ...prev, hoveredRouteId: null };
+          });
         }
         return;
       }
