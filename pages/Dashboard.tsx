@@ -85,6 +85,7 @@ const Dashboard: React.FC = () => {
   
   const [driverSortKey, setDriverSortKey] = useState<SortKey>('performance');
   const [driverSortOrder, setDriverSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [openTrackingDrawer, setOpenTrackingDrawer] = useState<string | null>(null);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -416,6 +417,15 @@ const Dashboard: React.FC = () => {
       filtered: finalFiltered 
     };
   }, [allData, driverRouteMap, searchTerm, selectedStatus, selectedRouteFilter, driverOverrides]);
+
+  const driverTicketsMap = useMemo(() => {
+    const map: Record<string, IHSTicket[]> = {};
+    stats.filtered.forEach(ticket => {
+      if (!map[ticket.driver]) map[ticket.driver] = [];
+      map[ticket.driver].push(ticket);
+    });
+    return map;
+  }, [stats.filtered]);
 
   const totals = useMemo(() => {
     const faturadosItems = stats.filtered.filter(i => i.status === TicketStatus.ForBilling);
@@ -805,31 +815,74 @@ const Dashboard: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {filteredPerformanceStats.map((stat, idx) => (
-                      <tr key={idx} className="hover:bg-blue-50/50 transition-all">
-                        <td className="px-4 py-4 md:px-6 md:py-5 flex flex-col gap-1">
-                          <span className="font-bold text-gray-800 text-[10px] md:text-xs uppercase truncate max-w-[120px] md:max-w-none">{stat.name}</span>
-                          {stat.routes?.[0] && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRouteClick(stat.routes![0]);
-                              }}
-                              className="text-[7px] md:text-[8px] font-black px-1.5 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 w-fit hover:bg-blue-600 hover:text-white transition-all shadow-sm"
-                            >
-                              {stat.routes[0]}
-                            </button>
-                          )}
-                        </td>
-                        <td className="px-4 py-4 md:px-6 md:py-5 text-center font-black text-[10px] md:text-xs">
-                          {((stat.revertidos/(stat.totalTickets || 1))*100).toFixed(1)}%
-                        </td>
-                        <td className="px-4 py-4 md:px-6 md:py-5 text-center font-bold text-gray-700 text-[10px] md:text-xs">{stat.totalTickets}</td>
-                        <td className="px-4 py-4 md:px-6 md:py-5 text-center font-bold text-red-500 text-[10px] md:text-xs">{stat.faturados}</td>
-                        <td className="px-4 py-4 md:px-6 md:py-5 text-right font-semibold text-gray-600 text-[10px] md:text-xs">{formatCurrency(stat.totalValue)}</td>
-                        <td className="px-4 py-4 md:px-6 md:py-5 text-right text-red-600 font-black text-[10px] md:text-xs">{formatCurrency(stat.faturadosValue)}</td>
-                      </tr>
-                    ))}
+                    {filteredPerformanceStats.map((stat, idx) => {
+                      const tickets = driverTicketsMap[stat.name] || [];
+                      const isDrawerOpen = openTrackingDrawer === stat.name;
+                      return (
+                        <tr key={idx} className="hover:bg-blue-50/50 transition-all">
+                          <td className="px-4 py-4 md:px-6 md:py-5">
+                            <div className="flex flex-col gap-1">
+                              <span className="font-bold text-gray-800 text-[10px] md:text-xs uppercase truncate max-w-[120px] md:max-w-none">{stat.name}</span>
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {stat.routes?.[0] && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRouteClick(stat.routes![0]);
+                                    }}
+                                    className="text-[7px] md:text-[8px] font-black px-1.5 py-0.5 rounded border uppercase bg-blue-50 text-blue-600 border-blue-100 w-fit hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                                  >
+                                    {stat.routes[0]}
+                                  </button>
+                                )}
+                                {tickets.length > 0 && (
+                                  <>
+                                    <span className="text-[7px] md:text-[8px] text-gray-400 font-mono truncate max-w-[80px]">{tickets[0].spxtn.length > 12 ? tickets[0].spxtn.slice(0, 12) + '…' : tickets[0].spxtn}</span>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setOpenTrackingDrawer(isDrawerOpen ? null : stat.name);
+                                      }}
+                                      className="text-[8px] md:text-[9px] text-gray-400 hover:text-blue-600 transition-colors px-0.5 font-bold"
+                                      title={`${tickets.length} código(s)`}
+                                    >
+                                      {isDrawerOpen ? '▴' : '▾'} {tickets.length}
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                              {isDrawerOpen && tickets.length > 0 && (
+                                <div className="mt-1 bg-gray-50 border border-gray-200 rounded-lg overflow-hidden max-h-[160px] overflow-y-auto">
+                                  <table className="w-full text-left">
+                                    <thead className="bg-gray-100 sticky top-0">
+                                      <tr>
+                                        <th className="px-2 py-1 text-[7px] md:text-[8px] font-black text-gray-500 uppercase">Código</th>
+                                        <th className="px-2 py-1 text-[7px] md:text-[8px] font-black text-gray-500 uppercase text-right">Valor</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                      {tickets.map((tk, i) => (
+                                        <tr key={i} className={tk.status === TicketStatus.ForBilling ? 'bg-red-50/50' : ''}>
+                                          <td className={`px-2 py-1 text-[7px] md:text-[8px] font-mono ${tk.status === TicketStatus.ForBilling ? 'text-red-600 font-bold' : 'text-gray-600'}`}>{tk.spxtn}</td>
+                                          <td className={`px-2 py-1 text-[7px] md:text-[8px] text-right ${tk.status === TicketStatus.ForBilling ? 'text-red-600 font-bold' : 'text-gray-600'}`}>{formatCurrency(tk.pnrValue)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 md:px-6 md:py-5 text-center font-black text-[10px] md:text-xs">
+                            {((stat.revertidos/(stat.totalTickets || 1))*100).toFixed(1)}%
+                          </td>
+                          <td className="px-4 py-4 md:px-6 md:py-5 text-center font-bold text-gray-700 text-[10px] md:text-xs">{stat.totalTickets}</td>
+                          <td className="px-4 py-4 md:px-6 md:py-5 text-center font-bold text-red-500 text-[10px] md:text-xs">{stat.faturados}</td>
+                          <td className="px-4 py-4 md:px-6 md:py-5 text-right font-semibold text-gray-600 text-[10px] md:text-xs">{formatCurrency(stat.totalValue)}</td>
+                          <td className="px-4 py-4 md:px-6 md:py-5 text-right text-red-600 font-black text-[10px] md:text-xs">{formatCurrency(stat.faturadosValue)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
