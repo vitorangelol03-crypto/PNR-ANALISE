@@ -43,9 +43,13 @@ interface GroupedData {
 interface DragPayload {
   type: 'driver' | 'route';
   driverId?: number;
+  driverName?: string;
   sourceRouteId?: string;
   routeId?: string;
+  routeName?: string;
 }
+
+const DRAG_THRESHOLD = 6;
 
 const BancoDeRotas: React.FC = () => {
   const [groups, setGroups] = useState<RouteGroup[]>([]);
@@ -82,29 +86,12 @@ const BancoDeRotas: React.FC = () => {
   const [dragOverGroupName, setDragOverGroupName] = useState<string | null | undefined>(undefined);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  const dragPayloadRef = useRef<DragPayload | null>(null);
+  const ghostRef = useRef<HTMLDivElement | null>(null);
   const isDraggingRef = useRef(false);
-
-  useEffect(() => {
-    const onWheel = (e: WheelEvent) => {
-      if (!isDraggingRef.current) return;
-      e.preventDefault();
-      window.scrollBy({ top: e.deltaY, behavior: 'instant' as ScrollBehavior });
-    };
-    const onDragStart = () => { isDraggingRef.current = true; };
-    const onDragEnd = () => { isDraggingRef.current = false; };
-
-    window.addEventListener('dragstart', onDragStart);
-    window.addEventListener('dragend', onDragEnd);
-    window.addEventListener('drop', onDragEnd);
-    window.addEventListener('wheel', onWheel, { passive: false });
-
-    return () => {
-      window.removeEventListener('dragstart', onDragStart);
-      window.removeEventListener('dragend', onDragEnd);
-      window.removeEventListener('drop', onDragEnd);
-      window.removeEventListener('wheel', onWheel);
-    };
-  }, []);
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const pendingClickRef = useRef<(() => void) | null>(null);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
@@ -134,6 +121,110 @@ const BancoDeRotas: React.FC = () => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const getDropTarget = (x: number, y: number) => {
+    if (ghostRef.current) ghostRef.current.style.display = 'none';
+    const els = document.elementsFromPoint(x, y);
+    if (ghostRef.current) ghostRef.current.style.display = '';
+    const routeEl = els.find(el => el.hasAttribute('data-drop-route-id'));
+    const groupEl = els.find(el => el.hasAttribute('data-drop-group'));
+    return {
+      routeId: routeEl?.getAttribute('data-drop-route-id') ?? null,
+      groupName: groupEl ? (groupEl.getAttribute('data-drop-group') === '__none__' ? null : groupEl.getAttribute('data-drop-group')) : undefined,
+    };
+  };
+
+  const onPointerDownDraggable = useCallback((
+    e: React.PointerEvent,
+    payload: DragPayload,
+    label: string,
+    onClick?: () => void,
+  ) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    dragPayloadRef.current = payload;
+    dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+    isDraggingRef.current = false;
+    pendingClickRef.current = onClick ?? null;
+
+    const onMove = (me: PointerEvent) => {
+      const dx = me.clientX - dragStartPosRef.current!.x;
+      const dy = me.clientY - dragStartPosRef.current!.y;
+      if (!isDraggingRef.current && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+
+      if (!isDraggingRef.current) {
+        isDraggingRef.current = true;
+        pendingClickRef.current = null;
+        const ghost = document.createElement('div');
+        ghost.style.cssText = `position:fixed;pointer-events:none;z-index:9999;padding:8px 14px;background:#3b82f6;color:white;border-radius:10px;font-size:11px;font-weight:800;text-transform:uppercase;opacity:0.92;transform:translate(-50%,-50%);white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,0.25);letter-spacing:0.04em;`;
+        ghost.textContent = payload.type === 'driver' ? `✋ ${label}` : `📋 ${label}`;
+        document.body.appendChild(ghost);
+        ghostRef.current = ghost;
+      }
+
+      if (ghostRef.current) {
+        ghostRef.current.style.left = `${me.clientX}px`;
+        ghostRef.current.style.top = `${me.clientY}px`;
+      }
+
+      const { routeId, groupName } = getDropTarget(me.clientX, me.clientY);
+      setDragOverRouteId(routeId);
+      setDragOverGroupName(groupName);
+    };
+
+    const onUp = async (ue: PointerEvent) => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+
+      if (ghostRef.current) { ghostRef.current.remove(); ghostRef.current = null; }
+
+      if (!isDraggingRef.current) {
+        pendingClickRef.current?.();
+        pendingClickRef.current = null;
+        dragPayloadRef.current = null;
+        dragStartPosRef.current = null;
+        return;
+      }
+
+      isDraggingRef.current = false;
+      setDragOverRouteId(null);
+      setDragOverGroupName(undefined);
+
+      const { routeId, groupName } = getDropTarget(ue.clientX, ue.clientY);
+      const payload = dragPayloadRef.current;
+      dragPayloadRef.current = null;
+      dragStartPosRef.current = null;
+      if (!payload) return;
+
+      if (payload.type === 'driver' && payload.driverId != null && routeId) {
+        if (payload.sourceRouteId === routeId) return;
+        try {
+          if (payload.sourceRouteId) {
+            const oldLink = links.find(l => l.driver_id === payload.driverId && l.route_id === payload.sourceRouteId);
+            if (oldLink) await supabase.from('driver_route_links').delete().eq('id', oldLink.id);
+          }
+          const alreadyLinked = links.some(l => l.driver_id === payload.driverId && l.route_id === routeId);
+          if (!alreadyLinked) {
+            await supabase.from('driver_route_links').insert({ driver_id: payload.driverId, route_id: routeId, is_primary: true });
+          }
+          const rName = routes.find(r => r.id === routeId)?.name || 'rota';
+          showToast(payload.sourceRouteId ? `🔄 ${payload.driverName} movido para ${rName}` : `✅ ${payload.driverName} vinculado a ${rName}`);
+          await loadData();
+        } catch { showToast('Erro ao vincular motorista', 'error'); }
+      } else if (payload.type === 'route' && payload.routeId && groupName !== undefined) {
+        const route = routes.find(r => r.id === payload.routeId);
+        if (!route || route.route_group === groupName) return;
+        try {
+          await supabase.from('routes').update({ route_group: groupName }).eq('id', payload.routeId);
+          showToast(`📋 ${payload.routeName} movida para ${groupName ?? 'Sem Grupo'}`);
+          await loadData();
+        } catch { showToast('Erro ao mover rota', 'error'); }
+      }
+    };
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }, [links, routes, loadData]);
+
   const groupedData = useMemo(() => {
     const driverMap = new Map<number, Driver>();
     drivers.forEach(d => driverMap.set(d.id, d));
@@ -159,27 +250,22 @@ const BancoDeRotas: React.FC = () => {
         if (filterGroup !== 'none' && r.route_group !== filterGroup) return false;
       }
       if (!normalizedSearch) return true;
-      const routeMatch = matchesSearch(r.name);
       const routeDrivers = linksByRoute.get(r.id) || [];
-      const driverMatch = routeDrivers.some(d => matchesSearch(d.name));
-      return routeMatch || driverMatch;
+      return matchesSearch(r.name) || routeDrivers.some(d => matchesSearch(d.name));
     });
 
-    const result: GroupedData[] = [];
-
     const filterDriversForRoute = (r: Route) => {
-      const allDrivers = (linksByRoute.get(r.id) || []).sort((a, b) => a.name.localeCompare(b.name));
-      if (!normalizedSearch || matchesSearch(r.name)) return allDrivers;
-      return allDrivers.filter(d => matchesSearch(d.name));
+      const all = (linksByRoute.get(r.id) || []).sort((a, b) => a.name.localeCompare(b.name));
+      if (!normalizedSearch || matchesSearch(r.name)) return all;
+      return all.filter(d => matchesSearch(d.name));
     };
+
+    const result: GroupedData[] = [];
 
     groups.forEach(group => {
       const groupRoutes = filteredRoutes
         .filter(r => r.route_group === group.group_name)
-        .map(r => ({
-          route: r,
-          drivers: filterDriversForRoute(r),
-        }));
+        .map(r => ({ route: r, drivers: filterDriversForRoute(r) }));
       if (filterGroup === 'all' || filterGroup === group.group_name) {
         result.push({ group, routes: groupRoutes });
       }
@@ -187,10 +273,7 @@ const BancoDeRotas: React.FC = () => {
 
     const ungroupedRoutes = filteredRoutes
       .filter(r => !r.route_group || !groups.some(g => g.group_name === r.route_group))
-      .map(r => ({
-        route: r,
-        drivers: filterDriversForRoute(r),
-      }));
+      .map(r => ({ route: r, drivers: filterDriversForRoute(r) }));
     if (ungroupedRoutes.length > 0) {
       result.push({ group: null, routes: ungroupedRoutes });
     }
@@ -203,9 +286,7 @@ const BancoDeRotas: React.FC = () => {
     const normalizedSearch = searchTerm.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     return drivers.filter(d => {
       if (linkedIds.has(d.id) || d.is_excluded) return false;
-      if (normalizedSearch) {
-        return d.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(normalizedSearch);
-      }
+      if (normalizedSearch) return d.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(normalizedSearch);
       return true;
     });
   }, [drivers, links, searchTerm]);
@@ -215,41 +296,26 @@ const BancoDeRotas: React.FC = () => {
     setSavingRoute(true);
     try {
       const { error } = await supabase.from('routes').insert({
-        name: newRouteName.trim(),
-        route_group: newRouteGroup || null,
-        ceps: newRouteCeps,
-        description: newRouteDescription.trim() || null,
-        is_active: true,
+        name: newRouteName.trim(), route_group: newRouteGroup || null,
+        ceps: newRouteCeps, description: newRouteDescription.trim() || null, is_active: true,
       });
       if (error) throw error;
-      setShowNewRouteModal(false);
-      setNewRouteName('');
-      setNewRouteGroup('');
-      setNewRouteCeps([]);
-      setNewRouteCepInput('');
-      setNewRouteDescription('');
+      setShowNewRouteModal(false); setNewRouteName(''); setNewRouteGroup('');
+      setNewRouteCeps([]); setNewRouteCepInput(''); setNewRouteDescription('');
       await loadData();
-    } catch (err) {
-      console.error('Erro ao criar rota:', err);
-    } finally {
-      setSavingRoute(false);
-    }
+    } catch (err) { console.error(err); } finally { setSavingRoute(false); }
   };
 
   const handleAddCep = (input: string, setCeps: React.Dispatch<React.SetStateAction<string[]>>, setInput: React.Dispatch<React.SetStateAction<string>>) => {
     const clean = input.replace(/\D/g, '');
-    if (clean.length >= 5) {
-      setCeps(prev => [...prev, clean]);
-      setInput('');
-    }
+    if (clean.length >= 5) { setCeps(prev => [...prev, clean]); setInput(''); }
   };
 
   const openLinkModal = (route: Route) => {
     setSelectedRoute(route);
     const currentDriverIds = links.filter(l => l.route_id === route.id).map(l => l.driver_id);
     setSelectedDriverIds(new Set(currentDriverIds));
-    setLinkSearch('');
-    setShowLinkModal(true);
+    setLinkSearch(''); setShowLinkModal(true);
   };
 
   const handleSaveLinks = async () => {
@@ -258,39 +324,17 @@ const BancoDeRotas: React.FC = () => {
     try {
       const currentLinks = links.filter(l => l.route_id === selectedRoute.id);
       const currentIds = new Set(currentLinks.map(l => l.driver_id));
-
       const toAdd = [...selectedDriverIds].filter(id => !currentIds.has(id));
       const toRemove = currentLinks.filter(l => !selectedDriverIds.has(l.driver_id));
-
-      if (toRemove.length > 0) {
-        await supabase.from('driver_route_links').delete().in('id', toRemove.map(l => l.id));
-      }
-      if (toAdd.length > 0) {
-        await supabase.from('driver_route_links').insert(
-          toAdd.map(driverId => ({
-            driver_id: driverId,
-            route_id: selectedRoute.id,
-            is_primary: true,
-          }))
-        );
-      }
-
-      setShowLinkModal(false);
-      await loadData();
-    } catch (err) {
-      console.error('Erro ao salvar vínculos:', err);
-    } finally {
-      setSavingLinks(false);
-    }
+      if (toRemove.length > 0) await supabase.from('driver_route_links').delete().in('id', toRemove.map(l => l.id));
+      if (toAdd.length > 0) await supabase.from('driver_route_links').insert(toAdd.map(driverId => ({ driver_id: driverId, route_id: selectedRoute.id, is_primary: true })));
+      setShowLinkModal(false); await loadData();
+    } catch (err) { console.error(err); } finally { setSavingLinks(false); }
   };
 
   const openEditModal = (route: Route) => {
-    setEditingRoute(route);
-    setEditName(route.name);
-    setEditGroup(route.route_group || '');
-    setEditCeps(route.ceps || []);
-    setEditCepInput('');
-    setEditDescription(route.description || '');
+    setEditingRoute(route); setEditName(route.name); setEditGroup(route.route_group || '');
+    setEditCeps(route.ceps || []); setEditCepInput(''); setEditDescription(route.description || '');
   };
 
   const handleSaveEdit = async () => {
@@ -298,80 +342,11 @@ const BancoDeRotas: React.FC = () => {
     setSavingEdit(true);
     try {
       const { error } = await supabase.from('routes').update({
-        name: editName.trim(),
-        route_group: editGroup || null,
-        ceps: editCeps,
-        description: editDescription.trim() || null,
+        name: editName.trim(), route_group: editGroup || null, ceps: editCeps, description: editDescription.trim() || null,
       }).eq('id', editingRoute.id);
       if (error) throw error;
-      setEditingRoute(null);
-      await loadData();
-    } catch (err) {
-      console.error('Erro ao editar rota:', err);
-    } finally {
-      setSavingEdit(false);
-    }
-  };
-
-  const handleDropOnRoute = async (e: React.DragEvent, targetRouteId: string) => {
-    e.preventDefault();
-    setDragOverRouteId(null);
-    try {
-      const raw = e.dataTransfer.getData('text/plain');
-      if (!raw) return;
-      const payload: DragPayload = JSON.parse(raw);
-      if (payload.type !== 'driver' || !payload.driverId) return;
-      if (payload.sourceRouteId === targetRouteId) return;
-
-      const driverName = drivers.find(d => d.id === payload.driverId)?.name || 'Motorista';
-      const routeName = routes.find(r => r.id === targetRouteId)?.name || 'rota';
-
-      if (payload.sourceRouteId) {
-        const oldLink = links.find(l => l.driver_id === payload.driverId && l.route_id === payload.sourceRouteId);
-        if (oldLink) {
-          await supabase.from('driver_route_links').delete().eq('id', oldLink.id);
-        }
-      }
-
-      const alreadyLinked = links.some(l => l.driver_id === payload.driverId && l.route_id === targetRouteId);
-      if (!alreadyLinked) {
-        await supabase.from('driver_route_links').insert({
-          driver_id: payload.driverId,
-          route_id: targetRouteId,
-          is_primary: true,
-        });
-      }
-
-      showToast(payload.sourceRouteId
-        ? `🔄 ${driverName} movido para ${routeName}`
-        : `✅ ${driverName} vinculado a ${routeName}`);
-      await loadData();
-    } catch (err) {
-      showToast('Erro ao vincular motorista', 'error');
-      console.error(err);
-    }
-  };
-
-  const handleDropOnGroup = async (e: React.DragEvent, groupName: string | null) => {
-    e.preventDefault();
-    setDragOverGroupName(undefined);
-    try {
-      const raw = e.dataTransfer.getData('text/plain');
-      if (!raw) return;
-      const payload: DragPayload = JSON.parse(raw);
-      if (payload.type !== 'route' || !payload.routeId) return;
-
-      const route = routes.find(r => r.id === payload.routeId);
-      if (!route || route.route_group === groupName) return;
-
-      await supabase.from('routes').update({ route_group: groupName }).eq('id', payload.routeId);
-      const groupLabel = groupName || 'Sem Grupo';
-      showToast(`📋 ${route.name} movida para ${groupLabel}`);
-      await loadData();
-    } catch (err) {
-      showToast('Erro ao mover rota', 'error');
-      console.error(err);
-    }
+      setEditingRoute(null); await loadData();
+    } catch (err) { console.error(err); } finally { setSavingEdit(false); }
   };
 
   if (loading) {
@@ -386,7 +361,7 @@ const BancoDeRotas: React.FC = () => {
   }
 
   return (
-    <div className="max-w-[1400px] mx-auto p-4 md:p-8 space-y-6">
+    <div className="max-w-[1400px] mx-auto p-4 md:p-8 space-y-6 select-none">
       {toast && (
         <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[300] px-5 py-3 rounded-2xl shadow-xl text-sm font-bold text-white transition-all duration-300 ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
           {toast.msg}
@@ -418,9 +393,7 @@ const BancoDeRotas: React.FC = () => {
             className="px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20"
           >
             <option value="all">Todos os Grupos</option>
-            {groups.map(g => (
-              <option key={g.id} value={g.group_name}>{g.group_name}</option>
-            ))}
+            {groups.map(g => <option key={g.id} value={g.group_name}>{g.group_name}</option>)}
             <option value="none">Sem Grupo</option>
           </select>
           <button
@@ -445,12 +418,8 @@ const BancoDeRotas: React.FC = () => {
             {unlinkedDrivers.map(d => (
               <div
                 key={d.id}
-                draggable
-                onDragStart={e => {
-                  e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'driver', driverId: d.id }));
-                  e.dataTransfer.effectAllowed = 'move';
-                }}
-                className="px-3 py-1.5 bg-white border-2 border-amber-300 rounded-lg text-[10px] md:text-xs font-bold text-amber-800 uppercase cursor-grab active:cursor-grabbing hover:bg-amber-50 hover:shadow-md transition-all select-none"
+                onPointerDown={e => onPointerDownDraggable(e, { type: 'driver', driverId: d.id, driverName: d.name }, d.name)}
+                className="px-3 py-1.5 bg-white border-2 border-amber-300 rounded-lg text-[10px] md:text-xs font-bold text-amber-800 uppercase cursor-grab active:cursor-grabbing hover:bg-amber-50 hover:shadow-md transition-all touch-none"
                 title="Arraste até uma rota para vincular"
               >
                 ✋ {d.name}
@@ -468,11 +437,8 @@ const BancoDeRotas: React.FC = () => {
           onRouteClick={openLinkModal}
           onEditRoute={openEditModal}
           dragOverRouteId={dragOverRouteId}
-          onDragOverRoute={setDragOverRouteId}
-          onDropOnRoute={handleDropOnRoute}
           dragOverGroupName={dragOverGroupName}
-          onDragOverGroup={setDragOverGroupName}
-          onDropOnGroup={handleDropOnGroup}
+          onPointerDownDraggable={onPointerDownDraggable}
         />
       ))}
 
@@ -481,52 +447,32 @@ const BancoDeRotas: React.FC = () => {
           <div className="space-y-4">
             <div>
               <label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">Nome da Rota</label>
-              <input
-                autoFocus
-                type="text"
-                value={newRouteName}
-                onChange={e => setNewRouteName(e.target.value)}
-                placeholder="Ex: Caratinga, MG"
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20"
-              />
+              <input autoFocus type="text" value={newRouteName} onChange={e => setNewRouteName(e.target.value)} placeholder="Ex: Caratinga, MG"
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
             </div>
             <div>
               <label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">Grupo</label>
-              <select
-                value={newRouteGroup}
-                onChange={e => setNewRouteGroup(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20"
-              >
+              <select value={newRouteGroup} onChange={e => setNewRouteGroup(e.target.value)}
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20">
                 <option value="">Sem grupo</option>
-                {groups.map(g => (
-                  <option key={g.id} value={g.group_name}>{g.group_name}</option>
-                ))}
+                {groups.map(g => <option key={g.id} value={g.group_name}>{g.group_name}</option>)}
               </select>
             </div>
             <div>
               <label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">CEPs</label>
               <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newRouteCepInput}
-                  onChange={e => setNewRouteCepInput(e.target.value)}
+                <input type="text" value={newRouteCepInput} onChange={e => setNewRouteCepInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddCep(newRouteCepInput, setNewRouteCeps, setNewRouteCepInput); }}}
                   placeholder="Digite o CEP e pressione Enter"
-                  className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20"
-                />
-                <button
-                  onClick={() => handleAddCep(newRouteCepInput, setNewRouteCeps, setNewRouteCepInput)}
-                  className="px-4 py-2.5 bg-blue-100 text-blue-700 rounded-xl text-xs font-black hover:bg-blue-200 transition-all"
-                >
-                  +
-                </button>
+                  className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                <button onClick={() => handleAddCep(newRouteCepInput, setNewRouteCeps, setNewRouteCepInput)}
+                  className="px-4 py-2.5 bg-blue-100 text-blue-700 rounded-xl text-xs font-black hover:bg-blue-200 transition-all">+</button>
               </div>
               {newRouteCeps.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {newRouteCeps.map((cep, i) => (
                     <span key={i} className="px-2 py-1 bg-blue-50 border border-blue-100 rounded-lg text-[10px] font-bold text-blue-700 flex items-center gap-1">
-                      {cep}
-                      <button onClick={() => setNewRouteCeps(prev => prev.filter((_, idx) => idx !== i))} className="text-blue-400 hover:text-red-500 ml-0.5">×</button>
+                      {cep}<button onClick={() => setNewRouteCeps(prev => prev.filter((_, idx) => idx !== i))} className="text-blue-400 hover:text-red-500 ml-0.5">×</button>
                     </span>
                   ))}
                 </div>
@@ -534,19 +480,11 @@ const BancoDeRotas: React.FC = () => {
             </div>
             <div>
               <label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">Descrição (opcional)</label>
-              <textarea
-                value={newRouteDescription}
-                onChange={e => setNewRouteDescription(e.target.value)}
-                placeholder="Descrição da rota..."
-                rows={2}
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
-              />
+              <textarea value={newRouteDescription} onChange={e => setNewRouteDescription(e.target.value)} rows={2}
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20 resize-none" />
             </div>
-            <button
-              onClick={handleSaveNewRoute}
-              disabled={savingRoute || !newRouteName.trim()}
-              className="w-full py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50 hover:bg-blue-700 transition-all active:scale-95"
-            >
+            <button onClick={handleSaveNewRoute} disabled={savingRoute || !newRouteName.trim()}
+              className="w-full py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50 hover:bg-blue-700 transition-all active:scale-95">
               {savingRoute ? 'Salvando...' : 'Criar Rota'}
             </button>
           </div>
@@ -556,41 +494,22 @@ const BancoDeRotas: React.FC = () => {
       {showLinkModal && selectedRoute && (
         <Modal onClose={() => setShowLinkModal(false)} title={`Motoristas → ${selectedRoute.name}`}>
           <div className="space-y-4">
-            <input
-              type="text"
-              value={linkSearch}
-              onChange={e => setLinkSearch(e.target.value)}
-              placeholder="Buscar motorista..."
-              className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20"
-            />
+            <input type="text" value={linkSearch} onChange={e => setLinkSearch(e.target.value)} placeholder="Buscar motorista..."
+              className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
             <div className="max-h-[50vh] overflow-y-auto space-y-1.5 pr-1">
-              {drivers
-                .filter(d => !d.is_excluded && d.name.toLowerCase().includes(linkSearch.toLowerCase()))
-                .map(d => (
-                  <label key={d.id} className={`flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer transition-all ${selectedDriverIds.has(d.id) ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
-                    <input
-                      type="checkbox"
-                      checked={selectedDriverIds.has(d.id)}
-                      onChange={() => {
-                        setSelectedDriverIds(prev => {
-                          const next = new Set(prev);
-                          if (next.has(d.id)) next.delete(d.id); else next.add(d.id);
-                          return next;
-                        });
-                      }}
-                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-xs font-bold text-gray-700 uppercase">{d.name}</span>
-                  </label>
-                ))}
+              {drivers.filter(d => !d.is_excluded && d.name.toLowerCase().includes(linkSearch.toLowerCase())).map(d => (
+                <label key={d.id} className={`flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer transition-all ${selectedDriverIds.has(d.id) ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
+                  <input type="checkbox" checked={selectedDriverIds.has(d.id)}
+                    onChange={() => setSelectedDriverIds(prev => { const next = new Set(prev); if (next.has(d.id)) next.delete(d.id); else next.add(d.id); return next; })}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                  <span className="text-xs font-bold text-gray-700 uppercase">{d.name}</span>
+                </label>
+              ))}
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-gray-400">{selectedDriverIds.size} selecionados</span>
-              <button
-                onClick={handleSaveLinks}
-                disabled={savingLinks}
-                className="px-6 py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50 hover:bg-blue-700 transition-all active:scale-95"
-              >
+              <button onClick={handleSaveLinks} disabled={savingLinks}
+                className="px-6 py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50 hover:bg-blue-700 transition-all active:scale-95">
                 {savingLinks ? 'Salvando...' : 'Salvar Vínculos'}
               </button>
             </div>
@@ -603,51 +522,32 @@ const BancoDeRotas: React.FC = () => {
           <div className="space-y-4">
             <div>
               <label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">Nome da Rota</label>
-              <input
-                autoFocus
-                type="text"
-                value={editName}
-                onChange={e => setEditName(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20"
-              />
+              <input autoFocus type="text" value={editName} onChange={e => setEditName(e.target.value)}
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
             </div>
             <div>
               <label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">Grupo</label>
-              <select
-                value={editGroup}
-                onChange={e => setEditGroup(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20"
-              >
+              <select value={editGroup} onChange={e => setEditGroup(e.target.value)}
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20">
                 <option value="">Sem grupo</option>
-                {groups.map(g => (
-                  <option key={g.id} value={g.group_name}>{g.group_name}</option>
-                ))}
+                {groups.map(g => <option key={g.id} value={g.group_name}>{g.group_name}</option>)}
               </select>
             </div>
             <div>
               <label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">CEPs</label>
               <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={editCepInput}
-                  onChange={e => setEditCepInput(e.target.value)}
+                <input type="text" value={editCepInput} onChange={e => setEditCepInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddCep(editCepInput, setEditCeps, setEditCepInput); }}}
                   placeholder="Digite o CEP e pressione Enter"
-                  className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20"
-                />
-                <button
-                  onClick={() => handleAddCep(editCepInput, setEditCeps, setEditCepInput)}
-                  className="px-4 py-2.5 bg-blue-100 text-blue-700 rounded-xl text-xs font-black hover:bg-blue-200 transition-all"
-                >
-                  +
-                </button>
+                  className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                <button onClick={() => handleAddCep(editCepInput, setEditCeps, setEditCepInput)}
+                  className="px-4 py-2.5 bg-blue-100 text-blue-700 rounded-xl text-xs font-black hover:bg-blue-200 transition-all">+</button>
               </div>
               {editCeps.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {editCeps.map((cep, i) => (
                     <span key={i} className="px-2 py-1 bg-blue-50 border border-blue-100 rounded-lg text-[10px] font-bold text-blue-700 flex items-center gap-1">
-                      {cep}
-                      <button onClick={() => setEditCeps(prev => prev.filter((_, idx) => idx !== i))} className="text-blue-400 hover:text-red-500 ml-0.5">×</button>
+                      {cep}<button onClick={() => setEditCeps(prev => prev.filter((_, idx) => idx !== i))} className="text-blue-400 hover:text-red-500 ml-0.5">×</button>
                     </span>
                   ))}
                 </div>
@@ -655,18 +555,11 @@ const BancoDeRotas: React.FC = () => {
             </div>
             <div>
               <label className="text-[10px] font-black text-gray-500 uppercase mb-1 block">Descrição (opcional)</label>
-              <textarea
-                value={editDescription}
-                onChange={e => setEditDescription(e.target.value)}
-                rows={2}
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
-              />
+              <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} rows={2}
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20 resize-none" />
             </div>
-            <button
-              onClick={handleSaveEdit}
-              disabled={savingEdit || !editName.trim()}
-              className="w-full py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50 hover:bg-blue-700 transition-all active:scale-95"
-            >
+            <button onClick={handleSaveEdit} disabled={savingEdit || !editName.trim()}
+              className="w-full py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50 hover:bg-blue-700 transition-all active:scale-95">
               {savingEdit ? 'Salvando...' : 'Salvar Alterações'}
             </button>
           </div>
@@ -678,7 +571,7 @@ const BancoDeRotas: React.FC = () => {
 
 const Modal: React.FC<{ onClose: () => void; title: string; children: React.ReactNode }> = ({ onClose, title, children }) => (
   <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-    <div className="bg-white rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl scale-in-center max-h-[90vh] overflow-y-auto">
+    <div className="bg-white rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-black text-gray-800 uppercase tracking-tight">{title}</h2>
         <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-all text-lg">✕</button>
@@ -694,35 +587,27 @@ const GroupSection: React.FC<{
   onRouteClick: (route: Route) => void;
   onEditRoute: (route: Route) => void;
   dragOverRouteId: string | null;
-  onDragOverRoute: (id: string | null) => void;
-  onDropOnRoute: (e: React.DragEvent, routeId: string) => void;
   dragOverGroupName: string | null | undefined;
-  onDragOverGroup: (name: string | null | undefined) => void;
-  onDropOnGroup: (e: React.DragEvent, groupName: string | null) => void;
-}> = ({ group, routes, onRouteClick, onEditRoute, dragOverRouteId, onDragOverRoute, onDropOnRoute, dragOverGroupName, onDragOverGroup, onDropOnGroup }) => {
+  onPointerDownDraggable: (e: React.PointerEvent, payload: DragPayload, label: string, onClick?: () => void) => void;
+}> = ({ group, routes, onRouteClick, onEditRoute, dragOverRouteId, dragOverGroupName, onPointerDownDraggable }) => {
   const color = group?.color || '#94a3b8';
   const groupName = group?.group_name || 'Sem Grupo Definido';
   const groupKey = group?.group_name ?? null;
+  const dropGroupAttr = groupKey ?? '__none__';
   const isGroupHovered = dragOverGroupName === groupKey;
 
   return (
     <div
       className={`bg-white rounded-2xl shadow-sm border overflow-hidden transition-all duration-150 ${isGroupHovered ? 'ring-2 ring-offset-1' : ''}`}
       style={{ borderColor: isGroupHovered ? color : `${color}40`, ...(isGroupHovered ? { '--tw-ring-color': color } as any : {}) }}
-      onDragOver={e => { e.preventDefault(); onDragOverGroup(groupKey); }}
-      onDragLeave={e => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) onDragOverGroup(undefined);
-      }}
-      onDrop={e => onDropOnGroup(e, groupKey)}
     >
       <div
+        data-drop-group={dropGroupAttr}
         className={`p-4 md:p-5 border-b flex items-center gap-3 transition-all ${isGroupHovered ? 'opacity-90' : ''}`}
         style={{ backgroundColor: isGroupHovered ? `${color}25` : `${color}10`, borderColor: `${color}30` }}
       >
         <div className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: color }}></div>
-        <h3 className="text-sm md:text-base font-black uppercase tracking-tight" style={{ color }}>
-          {groupName}
-        </h3>
+        <h3 className="text-sm md:text-base font-black uppercase tracking-tight" style={{ color }}>{groupName}</h3>
         <span className="text-[10px] font-bold text-gray-400 uppercase">{routes.length} rotas</span>
         {isGroupHovered && (
           <span className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: color }}>
@@ -731,9 +616,13 @@ const GroupSection: React.FC<{
         )}
       </div>
 
-      <div className="p-4 md:p-6 space-y-4">
+      <div className="p-4 md:p-6 space-y-4" data-drop-group={dropGroupAttr}>
         {routes.length === 0 && (
-          <div className={`py-6 text-center rounded-xl border-2 border-dashed transition-all ${isGroupHovered ? 'border-opacity-60' : 'border-gray-200'}`} style={isGroupHovered ? { borderColor: color } : {}}>
+          <div
+            data-drop-group={dropGroupAttr}
+            className={`py-6 text-center rounded-xl border-2 border-dashed transition-all ${isGroupHovered ? 'border-opacity-60' : 'border-gray-200'}`}
+            style={isGroupHovered ? { borderColor: color } : {}}
+          >
             <p className="text-xs font-bold text-gray-300 uppercase italic">
               {isGroupHovered ? 'Solte para mover rota aqui' : 'Nenhuma rota neste grupo'}
             </p>
@@ -748,8 +637,7 @@ const GroupSection: React.FC<{
             onRouteClick={onRouteClick}
             onEditRoute={onEditRoute}
             isDragOver={dragOverRouteId === route.id}
-            onDragOverRoute={onDragOverRoute}
-            onDropOnRoute={onDropOnRoute}
+            onPointerDownDraggable={onPointerDownDraggable}
           />
         ))}
       </div>
@@ -764,9 +652,8 @@ const WorkflowRow: React.FC<{
   onRouteClick: (route: Route) => void;
   onEditRoute: (route: Route) => void;
   isDragOver: boolean;
-  onDragOverRoute: (id: string | null) => void;
-  onDropOnRoute: (e: React.DragEvent, routeId: string) => void;
-}> = ({ route, drivers, color, onRouteClick, onEditRoute, isDragOver, onDragOverRoute, onDropOnRoute }) => {
+  onPointerDownDraggable: (e: React.PointerEvent, payload: DragPayload, label: string, onClick?: () => void) => void;
+}> = ({ route, drivers, color, onRouteClick, onEditRoute, isDragOver, onPointerDownDraggable }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const routeRef = useRef<HTMLDivElement>(null);
   const driverRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -774,27 +661,20 @@ const WorkflowRow: React.FC<{
 
   useEffect(() => {
     const updateLines = () => {
-      if (!containerRef.current || !routeRef.current || drivers.length === 0) {
-        setLines([]);
-        return;
-      }
+      if (!containerRef.current || !routeRef.current || drivers.length === 0) { setLines([]); return; }
       const containerRect = containerRef.current.getBoundingClientRect();
       const routeRect = routeRef.current.getBoundingClientRect();
-
-      const newLines = driverRefs.current
-        .filter(Boolean)
-        .map(driverEl => {
-          const driverRect = driverEl!.getBoundingClientRect();
-          return {
-            x1: routeRect.right - containerRect.left,
-            y1: routeRect.top + routeRect.height / 2 - containerRect.top,
-            x2: driverRect.left - containerRect.left,
-            y2: driverRect.top + driverRect.height / 2 - containerRect.top,
-          };
-        });
+      const newLines = driverRefs.current.filter(Boolean).map(driverEl => {
+        const driverRect = driverEl!.getBoundingClientRect();
+        return {
+          x1: routeRect.right - containerRect.left,
+          y1: routeRect.top + routeRect.height / 2 - containerRect.top,
+          x2: driverRect.left - containerRect.left,
+          y2: driverRect.top + driverRect.height / 2 - containerRect.top,
+        };
+      });
       setLines(newLines);
     };
-
     updateLines();
     window.addEventListener('resize', updateLines);
     return () => window.removeEventListener('resize', updateLines);
@@ -804,56 +684,42 @@ const WorkflowRow: React.FC<{
     <div ref={containerRef} className="relative flex items-start gap-8 md:gap-16 min-h-[60px]">
       <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
         {lines.map((l, i) => (
-          <path
-            key={i}
+          <path key={i}
             d={`M ${l.x1} ${l.y1} C ${l.x1 + (l.x2 - l.x1) * 0.5} ${l.y1}, ${l.x1 + (l.x2 - l.x1) * 0.5} ${l.y2}, ${l.x2} ${l.y2}`}
-            fill="none"
-            stroke={color}
-            strokeWidth="2"
-            strokeOpacity="0.35"
-          />
+            fill="none" stroke={color} strokeWidth="2" strokeOpacity="0.35" />
         ))}
       </svg>
 
       <div
         ref={routeRef}
-        draggable
-        onDragStart={e => {
-          e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'route', routeId: route.id }));
-          e.dataTransfer.effectAllowed = 'move';
-        }}
-        onDragOver={e => { e.preventDefault(); onDragOverRoute(route.id); }}
-        onDragLeave={e => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node)) onDragOverRoute(null);
-        }}
-        onDrop={e => { e.stopPropagation(); onDropOnRoute(e, route.id); onDragOverRoute(null); }}
-        className={`relative z-10 shrink-0 w-48 md:w-56 p-3 md:p-4 rounded-xl border-2 bg-white shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group select-none ${
-          isDragOver ? 'ring-2 ring-offset-1 scale-105' : ''
-        }`}
+        data-drop-route-id={route.id}
+        onPointerDown={e => onPointerDownDraggable(
+          e,
+          { type: 'route', routeId: route.id, routeName: route.name },
+          route.name,
+          () => onRouteClick(route),
+        )}
+        className={`relative z-10 shrink-0 w-48 md:w-56 p-3 md:p-4 rounded-xl border-2 bg-white shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group touch-none ${isDragOver ? 'ring-2 ring-offset-1 scale-105' : ''}`}
         style={{
           borderColor: isDragOver ? color : `${color}60`,
           backgroundColor: isDragOver ? `${color}15` : 'white',
           ...(isDragOver ? { '--tw-ring-color': color } as any : {})
         }}
-        onClick={() => onRouteClick(route)}
         title="Arraste para mover de grupo · Clique para gerenciar motoristas"
       >
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
             <p className="text-xs md:text-sm font-black text-gray-800 uppercase truncate">{route.name}</p>
             {route.ceps && route.ceps.length > 0 && (
-              <p className="text-[9px] md:text-[10px] text-gray-400 font-bold mt-1 truncate">
-                {route.ceps.join(', ')}
-              </p>
+              <p className="text-[9px] md:text-[10px] text-gray-400 font-bold mt-1 truncate">{route.ceps.join(', ')}</p>
             )}
           </div>
           <button
+            onPointerDown={e => e.stopPropagation()}
             onClick={e => { e.stopPropagation(); onEditRoute(route); }}
             className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 transition-all text-xs"
             title="Editar rota"
-          >
-            ✏️
-          </button>
+          >✏️</button>
         </div>
         <div className="mt-2 flex items-center gap-1.5">
           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }}></div>
@@ -863,11 +729,10 @@ const WorkflowRow: React.FC<{
         </div>
       </div>
 
-      <div className="relative z-10 flex flex-col gap-1.5 flex-1 pt-1">
+      <div className="relative z-10 flex flex-col gap-1.5 flex-1 pt-1" data-drop-route-id={route.id}>
         {drivers.length === 0 ? (
           <div
-            onDragOver={e => { e.preventDefault(); onDragOverRoute(route.id); }}
-            onDrop={e => { e.stopPropagation(); onDropOnRoute(e, route.id); onDragOverRoute(null); }}
+            data-drop-route-id={route.id}
             className={`px-3 py-4 rounded-lg border-2 border-dashed transition-all ${isDragOver ? 'border-opacity-80 bg-opacity-10' : 'border-gray-200'}`}
             style={isDragOver ? { borderColor: color, backgroundColor: `${color}10` } : {}}
           >
@@ -880,13 +745,12 @@ const WorkflowRow: React.FC<{
             <div
               key={d.id}
               ref={el => { driverRefs.current[i] = el; }}
-              draggable
-              onDragStart={e => {
-                e.stopPropagation();
-                e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'driver', driverId: d.id, sourceRouteId: route.id }));
-                e.dataTransfer.effectAllowed = 'move';
-              }}
-              className="px-3 py-2 bg-white border rounded-lg shadow-sm hover:shadow cursor-grab active:cursor-grabbing transition-all select-none"
+              onPointerDown={e => onPointerDownDraggable(
+                e,
+                { type: 'driver', driverId: d.id, driverName: d.name, sourceRouteId: route.id },
+                d.name,
+              )}
+              className="px-3 py-2 bg-white border rounded-lg shadow-sm hover:shadow cursor-grab active:cursor-grabbing transition-all touch-none"
               style={{ borderColor: `${color}30` }}
               title="Arraste para mover para outra rota"
             >
