@@ -37,7 +37,7 @@ app.post('/api/gemini', async (req, res) => {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     const prompt = `${SYSTEM_PROMPT}\n\n--- DADOS ---\n${context || 'Sem dados'}\n---\n\nPERGUNTA: ${query}`;
 

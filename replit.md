@@ -10,7 +10,7 @@ A professional corporate dashboard for analyzing IHS tickets from CSV and Excel 
 - **Routing**: React Router v6
 - **File Parsing**: PapaParse (CSV), xlsx (Excel)
 - **Backend/DB**: Supabase (PostgreSQL)
-- **AI**: Google Gemini 2.5 Pro via @google/generative-ai SDK (server-side, SSE streaming)
+- **AI**: Google Gemini 2.0 Flash via @google/generative-ai SDK (server-side, SSE streaming)
 - **Markdown**: react-markdown for AI response rendering
 - **Language**: Portuguese (pt-BR)
 

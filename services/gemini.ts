@@ -57,7 +57,7 @@ async function buildContext(userQuery: string): Promise<string> {
   const parts: string[] = [];
 
   const [ticketsRes, driversRes, routesRes, linksRes, metaRes] = await Promise.all([
-    supabase.from('tickets').select('*').limit(2000),
+    supabase.from('tickets').select('*').limit(500),
     supabase.from('drivers').select('*').eq('is_excluded', false).order('name'),
     supabase.from('routes').select('*').order('name'),
     supabase.from('driver_route_links').select('*'),
