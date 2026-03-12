@@ -24,6 +24,13 @@ interface FrequentSearch {
   count: number;
 }
 
+const TOOLTIP_MESSAGES = [
+  'Posso te ajudar com análises de tickets! 📊',
+  'Tem dúvidas sobre motoristas ou rotas? Me pergunte! 🚚',
+  'Sou seu assistente IA de logística 🤖',
+  'Precisa de um resumo rápido? Estou aqui! ⚡',
+];
+
 const AIAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -39,11 +46,17 @@ const AIAssistant: React.FC = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'history'>('chat');
   const [clearingHistory, setClearingHistory] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const responseRef = useRef<HTMLDivElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const responseAccumulator = useRef('');
+  const tooltipIndex = useRef(0);
+  const tooltipTimers = useRef<{ show?: ReturnType<typeof setTimeout>; hide?: ReturnType<typeof setTimeout>; next?: ReturnType<typeof setTimeout> }>({});
+  const isOpenRef = useRef(isOpen);
+  isOpenRef.current = isOpen;
 
   const loadHistory = useCallback(async () => {
     const [recent, frequent] = await Promise.all([
@@ -59,6 +72,51 @@ const AIAssistant: React.FC = () => {
       loadHistory();
     }
   }, [isOpen, loadHistory]);
+
+  const clearTooltipTimers = useCallback(() => {
+    if (tooltipTimers.current.show) clearTimeout(tooltipTimers.current.show);
+    if (tooltipTimers.current.hide) clearTimeout(tooltipTimers.current.hide);
+    if (tooltipTimers.current.next) clearTimeout(tooltipTimers.current.next);
+  }, []);
+
+  const hideTooltip = useCallback(() => {
+    setTooltipVisible(false);
+    setTimeout(() => setShowTooltip(false), 300);
+  }, []);
+
+  const scheduleTooltipRef = useRef<(delay: number) => void>(() => {});
+  scheduleTooltipRef.current = (delay: number) => {
+    clearTooltipTimers();
+    tooltipTimers.current.show = setTimeout(() => {
+      if (!isOpenRef.current) {
+        tooltipIndex.current = (tooltipIndex.current + 1) % TOOLTIP_MESSAGES.length;
+        setShowTooltip(true);
+        setTimeout(() => setTooltipVisible(true), 10);
+
+        tooltipTimers.current.hide = setTimeout(() => {
+          hideTooltip();
+          tooltipTimers.current.next = setTimeout(() => scheduleTooltipRef.current(0), 30000);
+        }, 6000);
+      }
+    }, delay);
+  };
+
+  useEffect(() => {
+    if (!isOpen) {
+      scheduleTooltipRef.current(5000);
+    } else {
+      clearTooltipTimers();
+      setTooltipVisible(false);
+      setShowTooltip(false);
+    }
+    return () => clearTooltipTimers();
+  }, [isOpen, clearTooltipTimers]);
+
+  const dismissTooltip = useCallback(() => {
+    clearTooltipTimers();
+    hideTooltip();
+    tooltipTimers.current.next = setTimeout(() => scheduleTooltipRef.current(0), 30000);
+  }, [clearTooltipTimers, hideTooltip]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -156,15 +214,36 @@ const AIAssistant: React.FC = () => {
 
   return (
     <>
-      <button
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 z-[200] w-14 h-14 bg-gradient-to-br from-violet-600 to-indigo-700 text-white rounded-full shadow-xl shadow-violet-300/50 flex items-center justify-center hover:scale-110 transition-all duration-200 active:scale-95"
-        title="Assistente IA"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-        </svg>
-      </button>
+      <div className="fixed bottom-6 right-6 z-[200] flex flex-col items-end gap-2">
+        {showTooltip && (
+          <div
+            className={`relative bg-white border border-violet-200 rounded-2xl shadow-lg shadow-violet-200/40 px-4 py-2.5 max-w-[220px] transition-all duration-300 ${
+              tooltipVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
+            }`}
+          >
+            <button
+              onClick={(e) => { e.stopPropagation(); dismissTooltip(); }}
+              aria-label="Fechar dica"
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 text-[10px] font-bold transition-colors shadow-sm"
+            >
+              ✕
+            </button>
+            <p className="text-[11px] font-semibold text-gray-700 leading-snug">
+              {TOOLTIP_MESSAGES[tooltipIndex.current]}
+            </p>
+            <div className="absolute -bottom-1.5 right-5 w-3 h-3 bg-white border-b border-r border-violet-200 rotate-45" />
+          </div>
+        )}
+        <button
+          onClick={() => setIsOpen(true)}
+          className="w-14 h-14 bg-gradient-to-br from-violet-600 to-indigo-700 text-white rounded-full shadow-xl shadow-violet-300/50 flex items-center justify-center hover:scale-110 transition-all duration-200 active:scale-95"
+          title="Assistente IA"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+        </button>
+      </div>
 
       {isOpen && (
         <div className="fixed inset-0 z-[250] flex justify-end">
