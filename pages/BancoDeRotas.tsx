@@ -505,7 +505,7 @@ const BancoDeRotas: React.FC = () => {
 
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
         <div>
-          <h1 className="text-xl md:text-2xl font-black text-[#1e3a8a] uppercase tracking-tight flex items-center gap-2">
+          <h1 className="text-xl md:text-2xl font-black text-[#58a6ff] uppercase tracking-tight flex items-center gap-2">
             <span className="p-1.5 bg-blue-50 rounded-lg text-lg">🗺️</span>
             Banco de Rotas
           </h1>
@@ -755,7 +755,7 @@ const RadialMenu: React.FC<{
         className="absolute text-center pointer-events-none"
         style={{ left: clampedOrigin.x, top: clampedOrigin.y, transform: 'translate(-50%, -50%)' }}
       >
-        <div className="px-4 py-2 bg-white/95 backdrop-blur rounded-xl shadow-lg border border-gray-200 inline-block">
+        <div className="px-4 py-2 bg-[#1c2232]/95 backdrop-blur rounded-xl shadow-lg border border-[#2a3347] inline-block">
           {menu.mode === 'driver' ? (
             <>
               <p className="text-[10px] font-black text-gray-500 uppercase tracking-wide">Vincular: {menu.driverName}</p>
@@ -819,7 +819,7 @@ const RadialMenu: React.FC<{
                           ? 'shadow-md scale-[1.02]'
                           : 'bg-white border-gray-100'
                       }`}
-                      style={menu.hoveredRouteId === r.id ? { backgroundColor: `${group.color}15`, borderColor: `${group.color}50`, color: group.color } : { color: '#374151' }}
+                      style={menu.hoveredRouteId === r.id ? { backgroundColor: `${group.color}15`, borderColor: `${group.color}50`, color: group.color } : { color: '#b0bac8' }}
                     >
                       {r.name}
                     </div>
@@ -836,7 +836,7 @@ const RadialMenu: React.FC<{
         );
       })}
 
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-2 bg-white/90 backdrop-blur rounded-xl shadow-lg pointer-events-none">
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-2 bg-[#1c2232]/90 backdrop-blur rounded-xl shadow-lg border border-[#2a3347] pointer-events-none">
         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Solte em área vazia para cancelar · ESC para fechar</p>
       </div>
     </div>
@@ -973,7 +973,7 @@ const WorkflowRow: React.FC<{
         className={`relative z-10 shrink-0 w-48 md:w-56 p-3 md:p-4 rounded-xl border-2 bg-white shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group touch-none ${isDragOver ? 'ring-2 ring-offset-1 scale-105' : ''}`}
         style={{
           borderColor: isDragOver ? color : `${color}60`,
-          backgroundColor: isDragOver ? `${color}15` : 'white',
+          backgroundColor: isDragOver ? `${color}15` : '#161b26',
           ...(isDragOver ? { '--tw-ring-color': color } as any : {})
         }}
         title="Segure para atalho · Arraste para mover de grupo · Clique para gerenciar motoristas"

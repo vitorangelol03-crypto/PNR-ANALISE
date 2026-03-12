@@ -5,7 +5,7 @@ A professional corporate dashboard for analyzing IHS tickets from CSV and Excel 
 
 ## Architecture
 - **Frontend**: React 19 + TypeScript, built with Vite
-- **Styling**: Tailwind CSS (via CDN)
+- **Styling**: Tailwind CSS (via CDN) with dark theme (default, CSS override system in index.html)
 - **Charts**: Recharts
 - **Routing**: React Router v6
 - **File Parsing**: PapaParse (CSV), xlsx (Excel)
@@ -78,6 +78,15 @@ A professional corporate dashboard for analyzing IHS tickets from CSV and Excel 
 - Target: Static site
 - Build command: `npm run build`
 - Public directory: `dist`
+
+## Dark Theme
+- Dark theme is the default and only theme (no light/dark toggle)
+- Implementation: CSS override system in `index.html` using `.dark` class on `<html>` element
+- Overrides Tailwind utility classes via higher specificity selectors (e.g., `.dark .bg-white`)
+- Color palette: page bg `#0d1117`, cards `#161b26`, secondary `#1c2232`, borders `#2a3347`, text primary `#e2e8f0`
+- Accent colors preserved but adapted: blue `#58a6ff`, red `#f87171`, green `#4ade80`, amber `#fbbf24`, violet `#a78bfa`
+- Header gradient: deep navy `#0c1529` → `#152244` → `#1a3060`
+- Custom hex colors in components updated directly (bg-[#f8fafc] → bg-[#0d1117], text-[#1e3a8a] → text-[#58a6ff], etc.)
 
 ## Key Configuration
 - Vite dev server: port 5000, host 0.0.0.0, allowedHosts: true (for Replit proxy)

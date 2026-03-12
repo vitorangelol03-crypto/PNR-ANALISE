@@ -490,7 +490,7 @@ const Dashboard: React.FC = () => {
   const handlePerformanceSearchChange = useCallback(debounce((v: string) => setPerformanceSearch(v), 300), []);
 
   return (
-    <div className="max-w-[1400px] mx-auto p-4 md:p-8 space-y-4 md:space-y-8 text-[#374151]">
+    <div className="max-w-[1400px] mx-auto p-4 md:p-8 space-y-4 md:space-y-8 text-[#e2e8f0]">
       
       <ConfirmModal 
         show={confirmModal.show}
@@ -517,7 +517,7 @@ const Dashboard: React.FC = () => {
                 className="w-full px-5 py-3 md:py-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-xl md:text-2xl font-black text-center outline-none focus:border-blue-500 transition-all tracking-[0.5em]"
               />
               <div className="flex gap-2">
-                <button type="submit" className="flex-1 py-3 md:py-4 bg-[#1e3a8a] text-white rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest shadow-lg shadow-blue-200 active:scale-95 transition-all">Desbloquear</button>
+                <button type="submit" className="flex-1 py-3 md:py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest shadow-lg shadow-black/30 active:scale-95 transition-all">Desbloquear</button>
                 <button type="button" onClick={() => { setShowPassModal(false); setPendingAction(null); setPassInput(''); }} className="px-4 md:px-6 py-3 md:py-4 bg-gray-100 text-gray-500 rounded-2xl font-black text-[10px] md:text-xs uppercase transition-all">Sair</button>
               </div>
             </form>
@@ -621,7 +621,7 @@ const Dashboard: React.FC = () => {
               })}
             </div>
             <div className="mt-4 pt-4 border-t border-gray-100 text-center">
-              <button onClick={() => setShowDriverMgmtModal(false)} className="w-full md:w-auto px-8 py-3 bg-[#1e3a8a] text-white rounded-xl font-black text-xs uppercase tracking-widest">Concluir</button>
+              <button onClick={() => setShowDriverMgmtModal(false)} className="w-full md:w-auto px-8 py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest">Concluir</button>
             </div>
           </div>
         </div>
@@ -629,7 +629,7 @@ const Dashboard: React.FC = () => {
 
       <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 md:gap-6 bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
         <div className="space-y-1">
-          <h1 className="text-xl md:text-3xl font-extrabold text-[#1e3a8a] flex items-center gap-2">
+          <h1 className="text-xl md:text-3xl font-extrabold text-[#58a6ff] flex items-center gap-2">
             <span className="p-1.5 bg-blue-50 rounded-lg text-lg md:text-xl">📊</span>
             Painel de Controle
           </h1>
@@ -655,11 +655,11 @@ const Dashboard: React.FC = () => {
             {isAdmin ? '🗑️' : '🔒'} Limpar
           </button>
           
-          <button onClick={() => withAdmin(() => setShowDriverMgmtModal(true))} className="bg-gray-100 text-[#1e3a8a] px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-black flex items-center justify-center gap-1.5 text-[9px] md:text-xs border border-gray-200 active:scale-95 transition-all">
+          <button onClick={() => withAdmin(() => setShowDriverMgmtModal(true))} className="bg-gray-100 text-[#58a6ff] px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-black flex items-center justify-center gap-1.5 text-[9px] md:text-xs border border-gray-200 active:scale-95 transition-all">
             {isAdmin ? '👤' : '🔒'} Vínculos
           </button>
           
-          <button onClick={() => withAdmin(() => document.getElementById('import-tickets-input')?.click())} className="bg-[#3b82f6] text-white px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 text-[9px] md:text-xs shadow-md active:scale-95 transition-all">
+          <button onClick={() => withAdmin(() => document.getElementById('import-tickets-input')?.click())} className="bg-blue-600 text-white px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 text-[9px] md:text-xs shadow-md active:scale-95 transition-all">
             {isAdmin ? '📥' : '🔒'} Importar PNR
           </button>
           <input id="import-tickets-input" type="file" className="hidden" accept=".csv, .xlsx, .xls" onChange={handleFileUpload} />
@@ -691,7 +691,7 @@ const Dashboard: React.FC = () => {
           </div>
           <button 
             onClick={() => {setSelectedRouteFilter('All'); setSelectedStatus('All'); setSearchTerm('');}} 
-            className="w-full sm:w-auto px-6 py-2.5 md:py-3 bg-[#3b82f6] text-white rounded-xl text-[10px] md:text-xs font-black shadow-md shrink-0 sm:mt-4 active:scale-95 transition-all"
+            className="w-full sm:w-auto px-6 py-2.5 md:py-3 bg-blue-600 text-white rounded-xl text-[10px] md:text-xs font-black shadow-md shrink-0 sm:mt-4 active:scale-95 transition-all"
           >
             Limpar Filtros
           </button>

@@ -218,7 +218,7 @@ const AIAssistant: React.FC = () => {
       <div className="fixed bottom-6 right-6 z-[200] flex flex-col items-end gap-2">
         {showTooltip && (
           <div
-            className={`relative bg-white border border-violet-200 rounded-2xl shadow-lg shadow-violet-200/40 px-4 py-2.5 max-w-[220px] transition-all duration-300 ${
+            className={`relative bg-[#1c2232] border border-violet-500/20 rounded-2xl shadow-lg px-4 py-2.5 max-w-[220px] transition-all duration-300 ${
               tooltipVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
             }`}
           >
@@ -232,12 +232,12 @@ const AIAssistant: React.FC = () => {
             <p className="text-[11px] font-semibold text-gray-700 leading-snug">
               {TOOLTIP_MESSAGES[tooltipIndex.current]}
             </p>
-            <div className="absolute -bottom-1.5 right-5 w-3 h-3 bg-white border-b border-r border-violet-200 rotate-45" />
+            <div className="absolute -bottom-1.5 right-5 w-3 h-3 bg-[#1c2232] border-b border-r border-violet-500/20 rotate-45" />
           </div>
         )}
         <button
           onClick={() => setIsOpen(true)}
-          className="w-14 h-14 bg-gradient-to-br from-violet-600 to-indigo-700 text-white rounded-full shadow-xl shadow-violet-300/50 flex items-center justify-center hover:scale-110 transition-all duration-200 active:scale-95"
+          className="w-14 h-14 bg-gradient-to-br from-violet-600 to-indigo-700 text-white rounded-full shadow-xl shadow-black/40 flex items-center justify-center hover:scale-110 transition-all duration-200 active:scale-95"
           title="Assistente IA"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -250,7 +250,7 @@ const AIAssistant: React.FC = () => {
         <div className="fixed inset-0 z-[250] flex justify-end">
           <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
 
-          <div className="relative w-full max-w-lg bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 h-full">
+          <div className="relative w-full max-w-lg bg-[#131720] shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 h-full border-l border-[#2a3347]">
             <div className="bg-gradient-to-r from-violet-600 to-indigo-700 p-4 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
@@ -301,7 +301,7 @@ const AIAssistant: React.FC = () => {
                       <button
                         type="submit"
                         disabled={streaming || !query.trim()}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider hover:shadow-lg hover:shadow-violet-300/50 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider hover:shadow-lg hover:shadow-black/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {streaming ? '...' : 'Analisar'}
                       </button>
@@ -386,8 +386,8 @@ const AIAssistant: React.FC = () => {
 
                   {hasResponse && (
                     <div className="space-y-3">
-                      <div ref={responseRef} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm max-h-[60vh] overflow-y-auto">
-                        <div className="prose prose-sm max-w-none text-gray-700 overflow-x-auto ai-response">
+                      <div ref={responseRef} className="bg-[#161b26] border border-[#2a3347] rounded-2xl p-4 shadow-sm max-h-[60vh] overflow-y-auto">
+                        <div className="prose prose-sm max-w-none text-gray-700 overflow-x-auto ai-response prose-invert">
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
                             components={{

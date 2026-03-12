@@ -3,8 +3,8 @@ import { NavLink } from 'react-router-dom';
 
 const Header: React.FC = () => {
   const linkBase = "px-4 py-2 rounded-xl font-black text-xs uppercase tracking-wider transition-all duration-200";
-  const activeClass = "bg-white text-[#1e3a8a] shadow-md";
-  const inactiveClass = "text-white/70 hover:text-white hover:bg-white/10";
+  const activeClass = "bg-white/15 text-white shadow-md border border-white/10";
+  const inactiveClass = "text-white/50 hover:text-white hover:bg-white/10";
 
   return (
     <nav className="header-gradient sticky top-0 z-50 shadow-lg">
