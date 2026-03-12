@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   queryGemini,
   saveToSearchHistory,
@@ -287,6 +288,7 @@ const AIAssistant: React.FC = () => {
                       <div ref={responseRef} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
                         <div className="prose prose-sm max-w-none text-gray-700 overflow-x-auto ai-response">
                           <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
                             components={{
                               table: ({ children }) => (
                                 <div className="overflow-x-auto my-3 rounded-xl border border-gray-200">
