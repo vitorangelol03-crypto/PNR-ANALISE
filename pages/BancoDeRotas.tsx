@@ -194,7 +194,7 @@ const BancoDeRotas: React.FC = () => {
     const originX = e.clientX;
     const originY = e.clientY;
 
-    if (isDriver && groups.length > 0) {
+    if (isDriver && groups.length > 0 && e.pointerType === 'mouse') {
       holdTimerRef.current = setTimeout(() => {
         holdFiredRef.current = true;
         pendingClickRef.current = null;
@@ -700,8 +700,12 @@ const RadialMenu: React.FC<{
   return (
     <div
       className="fixed inset-0 z-[250] pointer-events-none"
-      style={{ background: 'radial-gradient(circle at center, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.4) 100%)' }}
+      style={{ background: 'radial-gradient(circle at center, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.4) 100%)', animation: 'radialFadeIn 200ms ease-out' }}
     >
+      <style>{`
+        @keyframes radialFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes radialBubblePop { from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+      `}</style>
       <div
         className="absolute text-center pointer-events-none"
         style={{ left: clampedOrigin.x, top: clampedOrigin.y, transform: 'translate(-50%, -50%)' }}
@@ -712,14 +716,14 @@ const RadialMenu: React.FC<{
         </div>
       </div>
 
-      {groupBubbles.map(({ group, x, y, routes: groupRoutes }) => {
+      {groupBubbles.map(({ group, x, y, routes: groupRoutes }, idx) => {
         const isExpanded = menu.expandedGroup === group.group_name;
         const isOther = menu.expandedGroup !== null && !isExpanded;
         const bx = clampedOrigin.x + x;
         const by = clampedOrigin.y + y + 50;
 
         return (
-          <div key={group.id} style={{ position: 'absolute', left: bx, top: by, transform: 'translate(-50%, -50%)', zIndex: isExpanded ? 10 : 5 }}>
+          <div key={group.id} style={{ position: 'absolute', left: bx, top: by, transform: 'translate(-50%, -50%)', zIndex: isExpanded ? 10 : 5, animation: `radialBubblePop 250ms ease-out ${idx * 60}ms both` }}>
             <div
               data-radial-group={group.group_name}
               className="flex flex-col items-center justify-center rounded-full transition-all duration-300 border-2 shadow-lg pointer-events-auto"
