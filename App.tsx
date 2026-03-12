@@ -63,6 +63,7 @@ const App: React.FC = () => {
   const [routeMap, setRouteMap] = useState<Record<string, string>>({});
   const [cityCache, setCityCache] = useState<Record<string, string>>({});
   const [driverOverrides, setDriverOverrides] = useState<Record<string, DriverOverride>>({});
+  const [knownDrivers, setKnownDrivers] = useState<string[]>([]);
   const [referenceDate, setReferenceDate] = useState<string>('');
   const [refreshKey, setRefreshKey] = useState<number>(0); // Gatilho para re-enriquecer CEPs
 
@@ -111,7 +112,7 @@ const App: React.FC = () => {
       try {
         const { data: mappingData } = await supabase.from('route_mapping').select('spxtn, cep');
         const { data: cacheData } = await supabase.from('city_cache').select('cep, city_info');
-        const { data: overrideData } = await supabase.from('driver_overrides').select('driver_name, overridden_route, is_excluded');
+        const { data: driversData } = await supabase.from('drivers').select('name, fixed_route, is_excluded').order('name');
         const { data: metaData } = await supabase.from('dashboard_meta').select('key, value');
         
         const refDate = metaData?.find(m => m.key === 'reference_date')?.value;
@@ -131,15 +132,16 @@ const App: React.FC = () => {
           setCityCache(c);
         }
 
-        if (overrideData) {
+        if (driversData) {
           const o: Record<string, DriverOverride> = {};
-          overrideData.forEach(row => {
-            o[row.driver_name] = { 
-              route: row.overridden_route || "", 
+          driversData.forEach(row => {
+            o[row.name] = { 
+              route: row.fixed_route || "", 
               isExcluded: !!row.is_excluded 
             };
           });
           setDriverOverrides(o);
+          setKnownDrivers(driversData.map(row => row.name));
         }
 
         if (ticketData) {
@@ -308,18 +310,15 @@ const App: React.FC = () => {
       const current = driverOverrides[driverName] || { route: "", isExcluded: false };
       const merged = { ...current, ...updates };
 
-      if (merged.route === "" && !merged.isExcluded) {
-        await supabase.from('driver_overrides').delete().eq('driver_name', driverName);
-        const newOverrides = { ...driverOverrides };
-        delete newOverrides[driverName];
-        setDriverOverrides(newOverrides);
-      } else {
-        await supabase.from('driver_overrides').upsert({ 
-          driver_name: driverName, 
-          overridden_route: merged.route, 
-          is_excluded: merged.is_excluded 
-        });
-        setDriverOverrides(prev => ({ ...prev, [driverName]: merged }));
+      await supabase.from('drivers').upsert({
+        name: driverName,
+        fixed_route: merged.route || null,
+        is_excluded: merged.isExcluded,
+      }, { onConflict: 'name' });
+
+      setDriverOverrides(prev => ({ ...prev, [driverName]: merged }));
+      if (!knownDrivers.includes(driverName)) {
+        setKnownDrivers(prev => [...prev, driverName].sort());
       }
     } catch (err) {
       console.error(err);
@@ -635,9 +634,10 @@ const App: React.FC = () => {
 
   const routeList = useMemo(() => Array.from(new Set(stats.routes.map(r => r.locationName))).sort() as string[], [stats.routes]);
   const uniqueDriversFromData = useMemo(() => {
-    const names = Array.from(new Set(allData.map(d => d.driver))).sort() as string[];
-    return names.filter(n => n.toLowerCase().includes(mgmtSearch.toLowerCase()));
-  }, [allData, mgmtSearch]);
+    const fromTickets = allData.map(d => d.driver);
+    const allNames = Array.from(new Set([...knownDrivers, ...fromTickets])).sort() as string[];
+    return allNames.filter(n => n.toLowerCase().includes(mgmtSearch.toLowerCase()));
+  }, [allData, knownDrivers, mgmtSearch]);
 
   const filteredRouteStats = useMemo(() => 
     stats.routes.filter(r => r.locationName.toLowerCase().includes(routeSearch.toLowerCase()) || r.cep.includes(routeSearch))
@@ -736,10 +736,12 @@ const App: React.FC = () => {
       {showDriverMgmtModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white rounded-3xl p-6 md:p-8 max-w-3xl w-full shadow-2xl flex flex-col h-[90vh]">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-between items-center mb-4">
               <div>
-                <h2 className="text-lg md:text-xl font-black text-gray-800 uppercase">Vínculos</h2>
-                <p className="text-[9px] md:text-xs text-gray-400 font-bold uppercase tracking-tighter">Gerenciar Rotas e Visibilidade</p>
+                <h2 className="text-lg md:text-xl font-black text-gray-800 uppercase">Vínculos de Motoristas</h2>
+                <p className="text-[9px] md:text-xs text-gray-400 font-bold uppercase tracking-tighter">
+                  {uniqueDriversFromData.length} motoristas · {knownDrivers.filter(n => driverOverrides[n]?.route && !driverOverrides[n]?.isExcluded).length} com rota fixa
+                </p>
               </div>
               <button onClick={() => setShowDriverMgmtModal(false)} className="p-2 hover:bg-gray-100 rounded-full text-lg">✕</button>
             </div>
@@ -759,20 +761,28 @@ const App: React.FC = () => {
               </div>
               {uniqueDriversFromData.map(name => {
                 const override = driverOverrides[name] || { route: "", isExcluded: false };
+                const hasTickets = allData.some(t => t.driver === name);
+                const allRouteOptions = Array.from(new Set([
+                  ...routeList.filter(r => r !== 'Não Mapeado'),
+                  ...Object.values(driverOverrides).map(o => o.route).filter(Boolean)
+                ])).sort() as string[];
                 return (
-                  <div key={name} className={`grid grid-cols-12 items-center gap-2 md:gap-4 p-2 md:p-3 bg-gray-50 rounded-xl border border-gray-100 transition-all ${override.isExcluded ? 'opacity-50' : ''}`}>
-                    <div className="col-span-5">
-                      <span className={`text-[10px] md:text-xs font-black uppercase truncate block ${override.isExcluded ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{name}</span>
+                  <div key={name} className={`grid grid-cols-12 items-center gap-2 md:gap-4 p-2 md:p-3 rounded-xl border transition-all ${override.isExcluded ? 'opacity-50 bg-gray-50 border-gray-100' : 'bg-white border-gray-200 shadow-sm'}`}>
+                    <div className="col-span-5 flex flex-col gap-0.5 overflow-hidden">
+                      <span className={`text-[10px] md:text-xs font-black uppercase truncate ${override.isExcluded ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{name}</span>
+                      <span className={`text-[7px] md:text-[8px] font-bold uppercase ${hasTickets ? 'text-blue-500' : 'text-gray-300'}`}>
+                        {hasTickets ? '● Com tickets' : '○ Sem tickets'}
+                      </span>
                     </div>
                     <div className="col-span-4">
                       <select 
                         disabled={override.isExcluded}
                         value={override.route} 
                         onChange={(e) => saveDriverOverride(name, { route: e.target.value })}
-                        className="w-full text-[8px] md:text-[10px] font-bold py-1 px-1 md:px-3 bg-white border border-gray-200 rounded-lg outline-none cursor-pointer"
+                        className="w-full text-[8px] md:text-[10px] font-bold py-1 px-1 md:px-2 bg-gray-50 border border-gray-200 rounded-lg outline-none cursor-pointer disabled:opacity-40"
                       >
                         <option value="">Auto Detect</option>
-                        {routeList.filter(r => r !== 'Não Mapeado').map(route => (
+                        {allRouteOptions.map(route => (
                           <option key={route} value={route}>{route}</option>
                         ))}
                       </select>
@@ -780,7 +790,7 @@ const App: React.FC = () => {
                     <div className="col-span-3 flex justify-center">
                       <button 
                         onClick={() => saveDriverOverride(name, { isExcluded: !override.isExcluded })}
-                        className={`px-2 md:px-3 py-1 md:py-1.5 rounded-lg text-[8px] md:text-[9px] font-black uppercase transition-all ${override.isExcluded ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white'}`}
+                        className={`px-2 md:px-3 py-1 md:py-1.5 rounded-lg text-[8px] md:text-[9px] font-black uppercase transition-all ${override.isExcluded ? 'bg-red-100 text-red-600 border border-red-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}
                       >
                         {override.isExcluded ? 'OFF' : 'ON'}
                       </button>
