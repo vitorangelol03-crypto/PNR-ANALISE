@@ -126,12 +126,18 @@ const BancoDeRotas: React.FC = () => {
 
     const result: GroupedData[] = [];
 
+    const filterDriversForRoute = (r: Route) => {
+      const allDrivers = (linksByRoute.get(r.id) || []).sort((a, b) => a.name.localeCompare(b.name));
+      if (!normalizedSearch || matchesSearch(r.name)) return allDrivers;
+      return allDrivers.filter(d => matchesSearch(d.name));
+    };
+
     groups.forEach(group => {
       const groupRoutes = filteredRoutes
         .filter(r => r.route_group === group.group_name)
         .map(r => ({
           route: r,
-          drivers: (linksByRoute.get(r.id) || []).sort((a, b) => a.name.localeCompare(b.name)),
+          drivers: filterDriversForRoute(r),
         }));
       if (filterGroup === 'all' || filterGroup === group.group_name) {
         result.push({ group, routes: groupRoutes });
@@ -142,7 +148,7 @@ const BancoDeRotas: React.FC = () => {
       .filter(r => !r.route_group || !groups.some(g => g.group_name === r.route_group))
       .map(r => ({
         route: r,
-        drivers: (linksByRoute.get(r.id) || []).sort((a, b) => a.name.localeCompare(b.name)),
+        drivers: filterDriversForRoute(r),
       }));
     if (ungroupedRoutes.length > 0) {
       result.push({ group: null, routes: ungroupedRoutes });
