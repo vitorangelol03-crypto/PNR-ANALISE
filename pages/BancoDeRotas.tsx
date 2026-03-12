@@ -86,8 +86,8 @@ const BancoDeRotas: React.FC = () => {
   const scrollSpeedRef = useRef<number>(0);
 
   useEffect(() => {
-    const EDGE_ZONE = 120;
-    const MAX_SPEED = 18;
+    const EDGE_ZONE = 150;
+    const MAX_SPEED = 40;
 
     const onDragOver = (e: DragEvent) => {
       const y = e.clientY;
