@@ -27,8 +27,9 @@ function classifyQuery(query: string, drivers: any[]): QueryIntent {
 
   const wantsRoutes = /rota|route|grupo|vinculo|vincul/.test(nq);
   const wantsCeps = /cep|regiao|area|bairro|cidade|endereco/.test(nq) || cepMatches.length > 0;
-  const wantsDriverRanking = /motorista|driver|ofensor|ranking|top|pior|melhor|desempenho|performance/.test(nq);
-  const wantsDrivers = wantsDriverRanking || matchedDrivers.length > 0;
+  const hasRankingKeyword = /motorista|driver|ofensor|ranking|top|pior|melhor|desempenho|performance/.test(nq);
+  const wantsDriverRanking = hasRankingKeyword && matchedDrivers.length === 0;
+  const wantsDrivers = hasRankingKeyword || matchedDrivers.length > 0;
   const wantsReasons = /motivo|razao|reason|rejeic|rejeit|porque|por que/.test(nq);
 
   const isSpecific = matchedDrivers.length > 0 || cepMatches.length > 0;
@@ -126,9 +127,8 @@ async function buildContext(userQuery: string): Promise<string> {
 
   if (intent.wantsDriverRanking || !intent.isSpecific) {
     const sortedDriverStats = [...driverStats.entries()].sort((a, b) => b[1].rev - a[1].rev);
-    const limit = intent.isSpecific ? 5 : 10;
-    parts.push(`\nTOP ${limit} MOTORISTAS POR REVERSÕES:`);
-    sortedDriverStats.slice(0, limit).forEach(([name, s]) => {
+    parts.push(`\nTOP 15 MOTORISTAS POR REVERSÕES:`);
+    sortedDriverStats.slice(0, 15).forEach(([name, s]) => {
       const pct = s.total > 0 ? ((s.rev / s.total) * 100).toFixed(0) : '0';
       parts.push(`- ${name}: ${s.total} tix, ${s.rev} rev (${pct}%), R$ ${s.revVal.toFixed(2)}`);
     });
@@ -143,9 +143,8 @@ async function buildContext(userQuery: string): Promise<string> {
       if (t.status === 'Reversed') s.rev++;
       cepStats.set(cep, s);
     });
-    const limit = intent.isSpecific ? 5 : 8;
-    parts.push(`\nTOP ${limit} CEPs PROBLEMÁTICOS:`);
-    [...cepStats.entries()].sort((a, b) => b[1].rev - a[1].rev).slice(0, limit).forEach(([cep, s]) => {
+    parts.push(`\nTOP 10 CEPs PROBLEMÁTICOS:`);
+    [...cepStats.entries()].sort((a, b) => b[1].rev - a[1].rev).slice(0, 10).forEach(([cep, s]) => {
       parts.push(`- ${cep}: ${s.total} tix, ${s.rev} rev`);
     });
   }
@@ -183,7 +182,12 @@ async function buildContext(userQuery: string): Promise<string> {
 
   parts.push(`\nRESUMO: ${drivers.length} motoristas (${drivers.filter(d => d.is_active).length} ativos) | ${routes.length} rotas | ${links.length} vínculos`);
 
-  return parts.join('\n');
+  const result = parts.join('\n');
+  const lines = result.split('\n');
+  if (lines.length > 150) {
+    return lines.slice(0, 150).join('\n') + '\n[... contexto truncado]';
+  }
+  return result;
 }
 
 export async function queryGeminiStream(
