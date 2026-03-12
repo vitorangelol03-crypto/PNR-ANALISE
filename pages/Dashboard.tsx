@@ -13,21 +13,6 @@ interface DriverOverride {
   isExcluded: boolean;
 }
 
-const CARATINGA_DISTRICTS = [
-  'dom lara', 
-  'dom modesto', 
-  'patrocinio', 
-  'santa efigenia',
-  'santa luzia', 
-  'santo antonio do manhuacu', 
-  'sapucaia', 
-  'sao candido', 
-  'sao joao do jacutinga',
-  'cordeiro de minas'
-];
-
-const normalizeText = (text: string) => 
-  text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
 const ConfirmModal = ({ show, title, message, onConfirm, onCancel, confirmText = "Confirmar", isDanger = false }: any) => {
   if (!show) return null;
@@ -58,12 +43,10 @@ const ConfirmModal = ({ show, title, message, onConfirm, onCancel, confirmText =
 
 const Dashboard: React.FC = () => {
   const [allData, setAllData] = useState<IHSTicket[]>([]);
-  const [routeMap, setRouteMap] = useState<Record<string, string>>({});
-  const [cityCache, setCityCache] = useState<Record<string, string>>({});
+  const [driverRouteMap, setDriverRouteMap] = useState<Record<string, string>>({});
   const [driverOverrides, setDriverOverrides] = useState<Record<string, DriverOverride>>({});
   const [knownDrivers, setKnownDrivers] = useState<string[]>([]);
   const [referenceDate, setReferenceDate] = useState<string>('');
-  const [refreshKey, setRefreshKey] = useState<number>(0);
 
   const [isAdmin, setIsAdmin] = useState<boolean>(() => {
     try {
@@ -83,7 +66,6 @@ const Dashboard: React.FC = () => {
 
   const [isLoadingSupabase, setIsLoadingSupabase] = useState(true);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
-  const [isFetchingCities, setIsFetchingCities] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   
   const [showDriverMgmtModal, setShowDriverMgmtModal] = useState(false);
@@ -108,26 +90,21 @@ const Dashboard: React.FC = () => {
     const loadInitialData = async () => {
       setIsLoadingSupabase(true);
       try {
-        const { data: mappingData } = await supabase.from('route_mapping').select('spxtn, cep');
-        const { data: cacheData } = await supabase.from('city_cache').select('cep, city_info');
         const { data: driversData } = await supabase.from('drivers').select('name, fixed_route, is_excluded').order('name');
         const { data: metaData } = await supabase.from('dashboard_meta').select('key, value');
+        const { data: linksData } = await supabase.from('driver_route_links').select('driver_id, route_id, driver:drivers(name), route:routes(name)');
         
         const refDate = metaData?.find(m => m.key === 'reference_date')?.value;
         if (refDate) setReferenceDate(refDate);
 
         const { data: ticketData } = await supabase.from('tickets').select('*');
 
-        if (mappingData) {
+        if (linksData) {
           const m: Record<string, string> = {};
-          mappingData.forEach(row => m[row.spxtn] = row.cep);
-          setRouteMap(m);
-        }
-
-        if (cacheData) {
-          const c: Record<string, string> = {};
-          cacheData.forEach(row => c[row.cep] = row.city_info);
-          setCityCache(c);
+          linksData.forEach((l: any) => {
+            if (l.driver?.name && l.route?.name) m[l.driver.name] = l.route.name;
+          });
+          setDriverRouteMap(m);
         }
 
         if (driversData) {
@@ -204,75 +181,6 @@ const Dashboard: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const fetchCityInfo = async (cep: string) => {
-    const cleanCep = (cep as string).replace(/\D/g, '');
-    if (cleanCep.length !== 8) return null;
-    if (cityCache[cleanCep]) return cityCache[cleanCep];
-
-    try {
-      const response = await fetch(`https://brasilapi.com.br/api/cep/v1/${cleanCep}`);
-      if (response.ok) {
-        const data = await response.json();
-        const neighborhood = data.neighborhood?.trim() || '';
-        const city = data.city?.trim() || '';
-        const state = data.state?.trim() || '';
-
-        let info = '';
-        
-        if (normalizeText(city) === 'caratinga') {
-          const normalizedNeighborhood = normalizeText(neighborhood);
-          const isDistrict = CARATINGA_DISTRICTS.some(d => normalizedNeighborhood.includes(normalizeText(d)));
-          
-          if (isDistrict) {
-            info = `${neighborhood} - ${city}, ${state}`;
-          } else {
-            info = `Caratinga, ${state}`; 
-          }
-        } else {
-          if (neighborhood && neighborhood.toLowerCase() !== 'centro' && neighborhood !== city) {
-            info = `${neighborhood} - ${city}, ${state}`;
-          } else {
-            info = `${city}, ${state}`;
-          }
-        }
-
-        await supabase.from('city_cache').upsert({ cep: cleanCep, city_info: info });
-        return info;
-      }
-    } catch (e) {
-      console.error("Erro ao buscar CEP:", cleanCep);
-    }
-    return null;
-  };
-
-  useEffect(() => {
-    const enrichCeps = async () => {
-      const uniqueCeps = Array.from(new Set(Object.values(routeMap) as string[]));
-      const missingCeps = uniqueCeps.filter((cep: string) => cep && !cityCache[cep.replace(/\D/g, '')]);
-
-      if (missingCeps.length > 0) {
-        setIsFetchingCities(true);
-        const newCache = { ...cityCache };
-        let hasNewData = false;
-        
-        for (const cep of missingCeps) {
-          const clean = (cep as string).replace(/\D/g, '');
-          if (clean.length === 8) {
-            const info = await fetchCityInfo(clean);
-            if (info) {
-              newCache[clean] = info;
-              hasNewData = true;
-            }
-            await new Promise(r => setTimeout(r, 250)); 
-          }
-        }
-        
-        if (hasNewData) setCityCache(newCache);
-        setIsFetchingCities(false);
-      }
-    };
-    if (Object.keys(routeMap).length > 0) enrichCeps();
-  }, [routeMap, refreshKey]);
 
   const triggerConfirm = (type: string, title: string, message: string, isDanger: boolean = false) => {
     setConfirmModal({ show: true, type, title, message, isDanger });
@@ -282,24 +190,8 @@ const Dashboard: React.FC = () => {
     const type = confirmModal.type;
     setConfirmModal({ ...confirmModal, show: false });
     
-    if (type === 'refresh_ceps') executeRefreshCeps();
     if (type === 'clear_tickets') executeClearAllTickets();
     if (type === 'reset_everything') executeResetEverything();
-    if (type === 'delete_routes') executeDeleteRoutes();
-  };
-
-  const executeRefreshCeps = async () => {
-    setIsFetchingCities(true);
-    try {
-      const cepsToRefresh = Array.from(new Set(Object.values(routeMap) as string[])).map((c: string) => c.replace(/\D/g, ''));
-      if (cepsToRefresh.length > 0) {
-        await supabase.from('city_cache').delete().in('cep', cepsToRefresh);
-        setCityCache({});
-        setRefreshKey(prev => prev + 1);
-      }
-    } catch (err) {
-      console.error("Erro ao atualizar ceps:", err);
-    }
   };
 
   const saveDriverOverride = async (driverName: string, updates: Partial<DriverOverride>) => {
@@ -341,14 +233,10 @@ const Dashboard: React.FC = () => {
     try {
       await Promise.all([
         supabase.from('tickets').delete().neq('ticket_id', '0_ignore_internal'),
-        supabase.from('route_mapping').delete().neq('spxtn', '0_ignore_internal'),
-        supabase.from('city_cache').delete().neq('cep', '0_ignore_internal'),
         supabase.from('dashboard_meta').delete().neq('key', '0_ignore_internal')
       ]);
 
       setAllData([]);
-      setRouteMap({});
-      setCityCache({});
       setReferenceDate('');
 
       const { data: driversData } = await supabase.from('drivers').select('name, fixed_route, is_excluded').order('name');
@@ -359,21 +247,6 @@ const Dashboard: React.FC = () => {
         });
         setDriverOverrides(o);
         setKnownDrivers(driversData.map(row => row.name));
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  const executeDeleteRoutes = async () => {
-    setIsDeleting(true);
-    try {
-      const { error } = await supabase.from('route_mapping').delete().neq('spxtn', '0_ignore');
-      if (!error) {
-        setRouteMap({});
-        location.reload();
       }
     } catch (err) {
       console.error(err);
@@ -440,52 +313,6 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleRouteFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    const extension = file.name.split('.').pop()?.toLowerCase();
-
-    const parseRows = async (rows: any[][]) => {
-      setIsProcessingFile(true);
-      try {
-        const dataRows = rows.filter(r => r.length >= 2);
-        const newMapping: Record<string, string> = {};
-        const upsertData: { spxtn: string, cep: string }[] = [];
-
-        dataRows.forEach(row => {
-          const spxtn = String(row[0] || '').trim();
-          const cep = String(row[1] || '').trim().replace(/\D/g, '');
-          if (spxtn && cep) {
-            newMapping[spxtn] = cep;
-            upsertData.push({ spxtn, cep });
-          }
-        });
-
-        if (upsertData.length > 0) {
-          const { error } = await supabase.from('route_mapping').upsert(upsertData, { onConflict: 'spxtn' });
-          if (error) throw error;
-          setRouteMap(prev => ({ ...prev, ...newMapping }));
-        }
-      } catch (err) {
-        console.error("Erro ao importar rotas:", err);
-      } finally {
-        setIsProcessingFile(false);
-        if (event.target) event.target.value = "";
-      }
-    };
-
-    if (extension === 'csv') {
-      Papa.parse(file, { complete: (res) => parseRows(res.data as any[][]), header: false, skipEmptyLines: true });
-    } else {
-      reader.onload = (e) => {
-        const wb = XLSX.read(e.target?.result, { type: 'binary' });
-        parseRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 }) as any[][]);
-      };
-      reader.readAsBinaryString(file);
-    }
-  };
-
   const confirmImport = async () => {
     if (!inputRefDate) return;
     setIsProcessingFile(true);
@@ -511,6 +338,14 @@ const Dashboard: React.FC = () => {
         await supabase.from('tickets').insert(chunk);
       }
 
+      const uniqueDrivers = [...new Set(tempTickets.map(t => t.driver).filter(Boolean))];
+      if (uniqueDrivers.length > 0) {
+        await supabase.from('drivers').upsert(
+          uniqueDrivers.map(name => ({ name, is_active: true, is_excluded: false })),
+          { onConflict: 'name', ignoreDuplicates: true }
+        );
+      }
+
       setAllData(tempTickets);
       setReferenceDate(inputRefDate);
       setShowImportModal(false);
@@ -526,41 +361,11 @@ const Dashboard: React.FC = () => {
     const rMap: Record<string, RouteStats> = {};
     
     const activeData = allData.filter(item => !driverOverrides[item.driver]?.isExcluded);
-    const driverRouteCounts: Record<string, Record<string, number>> = {};
-
-    activeData.forEach(item => {
-      let currentRoute = '';
-      if (driverOverrides[item.driver]?.route) {
-        currentRoute = driverOverrides[item.driver].route;
-      } else {
-        const rawCep = routeMap[item.spxtn];
-        if (rawCep) {
-          currentRoute = cityCache[rawCep] || `CEP ${rawCep}`;
-        }
-      }
-
-      if (currentRoute) {
-        if (!driverRouteCounts[item.driver]) driverRouteCounts[item.driver] = {};
-        driverRouteCounts[item.driver][currentRoute] = (driverRouteCounts[item.driver][currentRoute] || 0) + 1;
-      }
-    });
-
-    const driverPreferredRoute: Record<string, string> = {};
-    Object.entries(driverRouteCounts).forEach(([driver, routes]) => {
-      const sortedRoutes = Object.entries(routes).sort((a, b) => b[1] - a[1]);
-      if (sortedRoutes.length > 0) driverPreferredRoute[driver] = sortedRoutes[0][0];
-    });
 
     const getTicketFinalRoute = (item: IHSTicket) => {
       if (driverOverrides[item.driver]?.route) return driverOverrides[item.driver].route;
-      const rawCep = routeMap[item.spxtn];
-      if (rawCep) {
-        const cityInfo = cityCache[rawCep];
-        if (cityInfo) return cityInfo;
-        return `CEP ${rawCep}`;
-      }
-      if (driverPreferredRoute[item.driver]) return driverPreferredRoute[item.driver];
-      return 'Não Mapeado';
+      if (driverRouteMap[item.driver]) return driverRouteMap[item.driver];
+      return 'Sem Rota';
     };
 
     const filteredBySearch = activeData.filter(item => {
@@ -610,7 +415,7 @@ const Dashboard: React.FC = () => {
       routes: Object.values(rMap) as RouteStats[], 
       filtered: finalFiltered 
     };
-  }, [allData, routeMap, cityCache, searchTerm, selectedStatus, selectedRouteFilter, driverOverrides]);
+  }, [allData, driverRouteMap, searchTerm, selectedStatus, selectedRouteFilter, driverOverrides]);
 
   const totals = useMemo(() => {
     const faturadosItems = stats.filtered.filter(i => i.status === TicketStatus.ForBilling);
@@ -826,13 +631,6 @@ const Dashboard: React.FC = () => {
         
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 md:gap-4">
           <button 
-            onClick={() => triggerConfirm('refresh_ceps', 'Atualizar Cidades?', 'O sistema irá re-validar todos os CEPs mapeados na API pública para normalizar nomes e distritos.', false)}
-            className="flex items-center justify-center gap-1.5 px-3 py-2 md:px-4 md:py-2.5 rounded-xl font-black text-[9px] md:text-xs border bg-white text-gray-700 border-gray-200 transition-all hover:bg-gray-50 active:scale-95"
-          >
-            📍 ATUALIZAR CEPS
-          </button>
-
-          <button 
             onClick={() => withAdmin(() => triggerConfirm('reset_everything', '⚠️ RESET TOTAL?', 'Isso apagará DEFINITIVAMENTE todos os dados do banco de dados na nuvem. Ação irreversível.', true))}
             className={`flex items-center justify-center gap-1.5 px-3 py-2 md:px-4 md:py-2.5 rounded-xl font-black text-[9px] md:text-xs border transition-all active:scale-95 ${isAdmin ? 'bg-red-600 text-white border-red-700 shadow-lg shadow-red-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
           >
@@ -848,28 +646,16 @@ const Dashboard: React.FC = () => {
           </button>
           
           <button onClick={() => withAdmin(() => document.getElementById('import-tickets-input')?.click())} className="bg-[#3b82f6] text-white px-3 py-2 md:px-5 md:py-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 text-[9px] md:text-xs shadow-md active:scale-95 transition-all">
-            {isAdmin ? '📥' : '🔒'} Importar
+            {isAdmin ? '📥' : '🔒'} Importar PNR
           </button>
           <input id="import-tickets-input" type="file" className="hidden" accept=".csv, .xlsx, .xls" onChange={handleFileUpload} />
-          
-          <div className="flex gap-0.5 col-span-2 sm:col-auto">
-            <button onClick={() => withAdmin(() => document.getElementById('import-routes-input')?.click())} className="flex-1 bg-emerald-600 text-white px-4 py-2 md:px-5 md:py-2.5 rounded-l-xl font-bold flex items-center justify-center gap-1.5 text-[9px] md:text-xs shadow-md border-r border-emerald-500/30 active:scale-95 transition-all">
-              {isAdmin ? '🗺️' : '🔒'} Rotas
-            </button>
-            <input id="import-routes-input" type="file" className="hidden" accept=".csv, .xlsx, .xls" onChange={handleRouteFileUpload} />
-            {Object.keys(routeMap).length > 0 && (
-              <button onClick={() => withAdmin(() => triggerConfirm('delete_routes', 'Apagar Rotas?', 'Isso removerá todos os mapeamentos SPXTN-CEP.', true))} className="bg-red-500 text-white px-3 py-2 md:px-3 md:py-2.5 rounded-r-xl font-bold text-[9px] md:text-xs shadow-md transition-all active:scale-95">
-                {isAdmin ? '🗑️' : '🔒'}
-              </button>
-            )}
-          </div>
         </div>
       </header>
 
-      {(isFetchingCities || isLoadingSupabase || isProcessingFile) && (
+      {(isLoadingSupabase || isProcessingFile) && (
         <div className="bg-blue-600 text-white p-2.5 rounded-xl text-center text-[9px] md:text-xs font-black animate-pulse flex items-center justify-center gap-2">
           <div className="w-3 h-3 md:w-4 md:h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-          {isLoadingSupabase ? 'SINCRONIZANDO...' : isProcessingFile ? 'SALVANDO NA NUVEM...' : 'GEOLOCALIZANDO...'}
+          {isLoadingSupabase ? 'SINCRONIZANDO...' : 'SALVANDO NA NUVEM...'}
         </div>
       )}
 

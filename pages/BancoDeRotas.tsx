@@ -40,6 +40,13 @@ interface GroupedData {
   }[];
 }
 
+interface DragPayload {
+  type: 'driver' | 'route';
+  driverId?: number;
+  sourceRouteId?: string;
+  routeId?: string;
+}
+
 const BancoDeRotas: React.FC = () => {
   const [groups, setGroups] = useState<RouteGroup[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -70,6 +77,17 @@ const BancoDeRotas: React.FC = () => {
   const [editCepInput, setEditCepInput] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+
+  const [dragOverRouteId, setDragOverRouteId] = useState<string | null>(null);
+  const [dragOverGroupName, setDragOverGroupName] = useState<string | null | undefined>(undefined);
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, type });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 3000);
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -272,6 +290,67 @@ const BancoDeRotas: React.FC = () => {
     }
   };
 
+  const handleDropOnRoute = async (e: React.DragEvent, targetRouteId: string) => {
+    e.preventDefault();
+    setDragOverRouteId(null);
+    try {
+      const raw = e.dataTransfer.getData('text/plain');
+      if (!raw) return;
+      const payload: DragPayload = JSON.parse(raw);
+      if (payload.type !== 'driver' || !payload.driverId) return;
+      if (payload.sourceRouteId === targetRouteId) return;
+
+      const driverName = drivers.find(d => d.id === payload.driverId)?.name || 'Motorista';
+      const routeName = routes.find(r => r.id === targetRouteId)?.name || 'rota';
+
+      if (payload.sourceRouteId) {
+        const oldLink = links.find(l => l.driver_id === payload.driverId && l.route_id === payload.sourceRouteId);
+        if (oldLink) {
+          await supabase.from('driver_route_links').delete().eq('id', oldLink.id);
+        }
+      }
+
+      const alreadyLinked = links.some(l => l.driver_id === payload.driverId && l.route_id === targetRouteId);
+      if (!alreadyLinked) {
+        await supabase.from('driver_route_links').insert({
+          driver_id: payload.driverId,
+          route_id: targetRouteId,
+          is_primary: true,
+        });
+      }
+
+      showToast(payload.sourceRouteId
+        ? `🔄 ${driverName} movido para ${routeName}`
+        : `✅ ${driverName} vinculado a ${routeName}`);
+      await loadData();
+    } catch (err) {
+      showToast('Erro ao vincular motorista', 'error');
+      console.error(err);
+    }
+  };
+
+  const handleDropOnGroup = async (e: React.DragEvent, groupName: string | null) => {
+    e.preventDefault();
+    setDragOverGroupName(undefined);
+    try {
+      const raw = e.dataTransfer.getData('text/plain');
+      if (!raw) return;
+      const payload: DragPayload = JSON.parse(raw);
+      if (payload.type !== 'route' || !payload.routeId) return;
+
+      const route = routes.find(r => r.id === payload.routeId);
+      if (!route || route.route_group === groupName) return;
+
+      await supabase.from('routes').update({ route_group: groupName }).eq('id', payload.routeId);
+      const groupLabel = groupName || 'Sem Grupo';
+      showToast(`📋 ${route.name} movida para ${groupLabel}`);
+      await loadData();
+    } catch (err) {
+      showToast('Erro ao mover rota', 'error');
+      console.error(err);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -285,6 +364,12 @@ const BancoDeRotas: React.FC = () => {
 
   return (
     <div className="max-w-[1400px] mx-auto p-4 md:p-8 space-y-6">
+      {toast && (
+        <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[300] px-5 py-3 rounded-2xl shadow-xl text-sm font-bold text-white transition-all duration-300 ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+          {toast.msg}
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
         <div>
           <h1 className="text-xl md:text-2xl font-black text-[#1e3a8a] uppercase tracking-tight flex items-center gap-2">
@@ -293,6 +378,7 @@ const BancoDeRotas: React.FC = () => {
           </h1>
           <p className="text-[10px] md:text-xs text-gray-400 font-bold uppercase mt-1">
             {routes.length} rotas · {drivers.length} motoristas · {links.length} vínculos
+            <span className="ml-2 text-violet-400">· arraste motoristas para vincular</span>
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
@@ -323,6 +409,34 @@ const BancoDeRotas: React.FC = () => {
         </div>
       </div>
 
+      {unlinkedDrivers.length > 0 && (
+        <div className="bg-amber-50 rounded-2xl shadow-sm border border-amber-200 overflow-hidden">
+          <div className="p-4 md:p-5 bg-amber-100 border-b border-amber-200">
+            <h3 className="text-sm font-black text-amber-700 uppercase tracking-tight flex items-center gap-2">
+              <span className="animate-pulse">⏳</span>
+              Motoristas Aguardando Vinculação ({unlinkedDrivers.length})
+              <span className="text-[10px] font-normal text-amber-500 normal-case ml-1">— arraste até uma rota</span>
+            </h3>
+          </div>
+          <div className="p-4 md:p-5 flex flex-wrap gap-2">
+            {unlinkedDrivers.map(d => (
+              <div
+                key={d.id}
+                draggable
+                onDragStart={e => {
+                  e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'driver', driverId: d.id }));
+                  e.dataTransfer.effectAllowed = 'move';
+                }}
+                className="px-3 py-1.5 bg-white border-2 border-amber-300 rounded-lg text-[10px] md:text-xs font-bold text-amber-800 uppercase cursor-grab active:cursor-grabbing hover:bg-amber-50 hover:shadow-md transition-all select-none"
+                title="Arraste até uma rota para vincular"
+              >
+                ✋ {d.name}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {groupedData.map((gd, gIdx) => (
         <GroupSection
           key={gIdx}
@@ -330,26 +444,14 @@ const BancoDeRotas: React.FC = () => {
           routes={gd.routes}
           onRouteClick={openLinkModal}
           onEditRoute={openEditModal}
+          dragOverRouteId={dragOverRouteId}
+          onDragOverRoute={setDragOverRouteId}
+          onDropOnRoute={handleDropOnRoute}
+          dragOverGroupName={dragOverGroupName}
+          onDragOverGroup={setDragOverGroupName}
+          onDropOnGroup={handleDropOnGroup}
         />
       ))}
-
-      {unlinkedDrivers.length > 0 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="p-4 md:p-5 bg-gray-100 border-b border-gray-200">
-            <h3 className="text-sm font-black text-gray-600 uppercase tracking-tight flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-gray-400"></span>
-              Motoristas sem Rota ({unlinkedDrivers.length})
-            </h3>
-          </div>
-          <div className="p-4 md:p-5 flex flex-wrap gap-2">
-            {unlinkedDrivers.map(d => (
-              <span key={d.id} className="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-[10px] md:text-xs font-bold text-gray-600 uppercase">
-                {d.name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
 
       {showNewRouteModal && (
         <Modal onClose={() => setShowNewRouteModal(false)} title="Nova Rota">
@@ -568,24 +670,50 @@ const GroupSection: React.FC<{
   routes: { route: Route; drivers: Driver[] }[];
   onRouteClick: (route: Route) => void;
   onEditRoute: (route: Route) => void;
-}> = ({ group, routes, onRouteClick, onEditRoute }) => {
+  dragOverRouteId: string | null;
+  onDragOverRoute: (id: string | null) => void;
+  onDropOnRoute: (e: React.DragEvent, routeId: string) => void;
+  dragOverGroupName: string | null | undefined;
+  onDragOverGroup: (name: string | null | undefined) => void;
+  onDropOnGroup: (e: React.DragEvent, groupName: string | null) => void;
+}> = ({ group, routes, onRouteClick, onEditRoute, dragOverRouteId, onDragOverRoute, onDropOnRoute, dragOverGroupName, onDragOverGroup, onDropOnGroup }) => {
   const color = group?.color || '#94a3b8';
   const groupName = group?.group_name || 'Sem Grupo Definido';
+  const groupKey = group?.group_name ?? null;
+  const isGroupHovered = dragOverGroupName === groupKey;
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border overflow-hidden" style={{ borderColor: `${color}40` }}>
-      <div className="p-4 md:p-5 border-b flex items-center gap-3" style={{ backgroundColor: `${color}10`, borderColor: `${color}30` }}>
+    <div
+      className={`bg-white rounded-2xl shadow-sm border overflow-hidden transition-all duration-150 ${isGroupHovered ? 'ring-2 ring-offset-1' : ''}`}
+      style={{ borderColor: isGroupHovered ? color : `${color}40`, ...(isGroupHovered ? { '--tw-ring-color': color } as any : {}) }}
+      onDragOver={e => { e.preventDefault(); onDragOverGroup(groupKey); }}
+      onDragLeave={e => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) onDragOverGroup(undefined);
+      }}
+      onDrop={e => onDropOnGroup(e, groupKey)}
+    >
+      <div
+        className={`p-4 md:p-5 border-b flex items-center gap-3 transition-all ${isGroupHovered ? 'opacity-90' : ''}`}
+        style={{ backgroundColor: isGroupHovered ? `${color}25` : `${color}10`, borderColor: `${color}30` }}
+      >
         <div className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: color }}></div>
         <h3 className="text-sm md:text-base font-black uppercase tracking-tight" style={{ color }}>
           {groupName}
         </h3>
         <span className="text-[10px] font-bold text-gray-400 uppercase">{routes.length} rotas</span>
+        {isGroupHovered && (
+          <span className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: color }}>
+            Solte aqui para mover rota
+          </span>
+        )}
       </div>
 
       <div className="p-4 md:p-6 space-y-4">
         {routes.length === 0 && (
-          <div className="py-6 text-center">
-            <p className="text-xs font-bold text-gray-300 uppercase italic">Nenhuma rota neste grupo</p>
+          <div className={`py-6 text-center rounded-xl border-2 border-dashed transition-all ${isGroupHovered ? 'border-opacity-60' : 'border-gray-200'}`} style={isGroupHovered ? { borderColor: color } : {}}>
+            <p className="text-xs font-bold text-gray-300 uppercase italic">
+              {isGroupHovered ? 'Solte para mover rota aqui' : 'Nenhuma rota neste grupo'}
+            </p>
           </div>
         )}
         {routes.map(({ route, drivers: routeDrivers }) => (
@@ -596,6 +724,9 @@ const GroupSection: React.FC<{
             color={color}
             onRouteClick={onRouteClick}
             onEditRoute={onEditRoute}
+            isDragOver={dragOverRouteId === route.id}
+            onDragOverRoute={onDragOverRoute}
+            onDropOnRoute={onDropOnRoute}
           />
         ))}
       </div>
@@ -609,7 +740,10 @@ const WorkflowRow: React.FC<{
   color: string;
   onRouteClick: (route: Route) => void;
   onEditRoute: (route: Route) => void;
-}> = ({ route, drivers, color, onRouteClick, onEditRoute }) => {
+  isDragOver: boolean;
+  onDragOverRoute: (id: string | null) => void;
+  onDropOnRoute: (e: React.DragEvent, routeId: string) => void;
+}> = ({ route, drivers, color, onRouteClick, onEditRoute, isDragOver, onDragOverRoute, onDropOnRoute }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const routeRef = useRef<HTMLDivElement>(null);
   const driverRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -660,9 +794,26 @@ const WorkflowRow: React.FC<{
 
       <div
         ref={routeRef}
-        className="relative z-10 shrink-0 w-48 md:w-56 p-3 md:p-4 rounded-xl border-2 bg-white shadow-sm cursor-pointer hover:shadow-md transition-all group"
-        style={{ borderColor: `${color}60` }}
+        draggable
+        onDragStart={e => {
+          e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'route', routeId: route.id }));
+          e.dataTransfer.effectAllowed = 'move';
+        }}
+        onDragOver={e => { e.preventDefault(); onDragOverRoute(route.id); }}
+        onDragLeave={e => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) onDragOverRoute(null);
+        }}
+        onDrop={e => { e.stopPropagation(); onDropOnRoute(e, route.id); onDragOverRoute(null); }}
+        className={`relative z-10 shrink-0 w-48 md:w-56 p-3 md:p-4 rounded-xl border-2 bg-white shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all group select-none ${
+          isDragOver ? 'ring-2 ring-offset-1 scale-105' : ''
+        }`}
+        style={{
+          borderColor: isDragOver ? color : `${color}60`,
+          backgroundColor: isDragOver ? `${color}15` : 'white',
+          ...(isDragOver ? { '--tw-ring-color': color } as any : {})
+        }}
         onClick={() => onRouteClick(route)}
+        title="Arraste para mover de grupo · Clique para gerenciar motoristas"
       >
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
@@ -683,22 +834,38 @@ const WorkflowRow: React.FC<{
         </div>
         <div className="mt-2 flex items-center gap-1.5">
           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }}></div>
-          <span className="text-[8px] md:text-[9px] font-bold text-gray-400 uppercase">{drivers.length} motorista{drivers.length !== 1 ? 's' : ''}</span>
+          <span className="text-[8px] md:text-[9px] font-bold text-gray-400 uppercase">
+            {isDragOver ? '⬇ Solte aqui' : `${drivers.length} motorista${drivers.length !== 1 ? 's' : ''}`}
+          </span>
         </div>
       </div>
 
       <div className="relative z-10 flex flex-col gap-1.5 flex-1 pt-1">
         {drivers.length === 0 ? (
-          <div className="px-3 py-2 bg-gray-50 border border-dashed border-gray-200 rounded-lg">
-            <span className="text-[10px] text-gray-400 font-bold italic">Nenhum motorista vinculado</span>
+          <div
+            onDragOver={e => { e.preventDefault(); onDragOverRoute(route.id); }}
+            onDrop={e => { e.stopPropagation(); onDropOnRoute(e, route.id); onDragOverRoute(null); }}
+            className={`px-3 py-4 rounded-lg border-2 border-dashed transition-all ${isDragOver ? 'border-opacity-80 bg-opacity-10' : 'border-gray-200'}`}
+            style={isDragOver ? { borderColor: color, backgroundColor: `${color}10` } : {}}
+          >
+            <span className="text-[10px] text-gray-400 font-bold italic">
+              {isDragOver ? '⬇ Solte o motorista aqui' : 'Nenhum motorista vinculado'}
+            </span>
           </div>
         ) : (
           drivers.map((d, i) => (
             <div
               key={d.id}
               ref={el => { driverRefs.current[i] = el; }}
-              className="px-3 py-2 bg-white border rounded-lg shadow-sm hover:shadow transition-all"
+              draggable
+              onDragStart={e => {
+                e.stopPropagation();
+                e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'driver', driverId: d.id, sourceRouteId: route.id }));
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+              className="px-3 py-2 bg-white border rounded-lg shadow-sm hover:shadow cursor-grab active:cursor-grabbing transition-all select-none"
               style={{ borderColor: `${color}30` }}
+              title="Arraste para mover para outra rota"
             >
               <span className="text-[10px] md:text-xs font-bold text-gray-700 uppercase">{d.name}</span>
             </div>
