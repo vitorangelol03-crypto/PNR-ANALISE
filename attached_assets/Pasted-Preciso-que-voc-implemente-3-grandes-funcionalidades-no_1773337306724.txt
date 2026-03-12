@@ -1,0 +1,115 @@
+Preciso que você implemente 3 grandes funcionalidades no projeto PNR Dashboard. O banco de dados no Supabase já está todo preparado — NÃO tente criar tabelas, apenas leia e escreva dados nelas. Leia tudo antes de começar.
+
+NAVEGAÇÃO
+Criar um menu/header de navegação com duas páginas:
+
+"Dashboard" — página principal (já existe, vai receber a IA)
+"Banco de Rotas" — nova página com visual workflow
+
+Usar React Router ou navegação por estado.
+
+PARTE 1 — Assistente IA na Página Inicial (Dashboard)
+Integrar o Gemini 2.5 Pro como assistente de IA na página principal.
+Configuração da API:
+
+Chave salva nos Secrets como GEMINI_API_KEY
+Endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-06-05:generateContent
+Auth: query param key=${GEMINI_API_KEY}
+
+Interface:
+
+Painel "Assistente IA" na página principal (botão flutuante que abre painel lateral ou seção fixa)
+Campo de texto para o usuário digitar pedidos em linguagem natural
+Área de resposta formatada (tabelas, números, destaques, markdown renderizado)
+Botão para salvar o relatório gerado
+Seção "Buscas recentes" com histórico
+Seção "Buscas frequentes" (top 5 mais repetidas)
+Autocomplete no campo de busca com sugestões do histórico
+
+Como funciona por trás:
+
+Usuário faz um pedido
+Sistema consulta as tabelas relevantes do Supabase (tickets, drivers, routes, driver_route_links, route_mapping, city_cache, dashboard_meta)
+Monta contexto com os dados reais e envia pro Gemini junto com o pedido
+IA analisa e responde
+Salva o resultado na tabela ai_reports
+Salva a busca na tabela search_history
+
+Capacidades da IA:
+
+Gerar relatórios personalizados ("relatório de PNR do motorista João esta semana")
+Identificar ofensores ("quais motoristas tiveram mais rejeições?")
+Detectar CEPs automaticamente — quando o usuário mencionar um CEP, consultar city_cache para identificar a cidade e filtrar. Quando mencionar uma cidade, buscar CEPs no city_cache e route_mapping
+Comparar rotas e motoristas
+Resumo geral da operação
+Indicar dados relevantes, tendências e alertas
+Marcar ofensores (motoristas/rotas com performance ruim)
+
+System prompt da IA: Instruir o Gemini a ser um analista de logística PNR especializado, que responde em português, formata com tabelas e números, é direto nas análises e destaca problemas/ofensores.
+Tabelas no Supabase que a IA deve consultar:
+
+tickets — ticket_id, task_id, spxtn, driver, station, sla_deadline, assignee, pnr_value, rejection_reason, created_time, status
+drivers — id, name, fixed_route, is_active, is_excluded, station, route_group, notes
+routes — id, name, route_group, ceps (text[]), description, is_active
+driver_route_links — driver_id, route_id, is_primary
+route_mapping — spxtn, cep
+city_cache — cep, city_info
+dashboard_meta — key, value
+
+
+PARTE 2 — Página "Banco de Rotas" com Visual Workflow (estilo n8n)
+Criar uma segunda página com visual de workflow — nós/caixas conectados por linhas, similar ao n8n.
+Layout visual:
+A página é organizada por GRUPOS de rota (Rota A, B, C, D). Cada grupo é uma seção com a cor correspondente. Dentro de cada grupo, as rotas aparecem como nós à esquerda, conectados por linhas aos nós dos motoristas à direita.
+┌─────────────── ROTA C (cor amarela) ─────────────────────┐
+│                                                           │
+│  ┌──────────────┐         ┌───────────────────────────┐  │
+│  │  Ipanema, MG │─────────│ Diego Nunes da Paixão     │  │
+│  │              │         └───────────────────────────┘  │
+│  │ CEPs:        │                                        │
+│  │ 36950-000    │                                        │
+│  └──────────────┘                                        │
+│                                                           │
+│  ┌──────────────┐         ┌───────────────────────────┐  │
+│  │  Mutum, MG   │────┬────│ Antonio Junio             │  │
+│  │              │    ├────│ Bruno Ferrari              │  │
+│  │ CEPs:        │    └────│ Gustavo Henrique           │  │
+│  │ 36955-000    │         └───────────────────────────┘  │
+│  └──────────────┘                                        │
+└──────────────────────────────────────────────────────────┘
+Os nós de rota (esquerda) mostram o nome da cidade e os CEPs embaixo em tamanho pequeno. As linhas SVG ou CSS conectam cada rota aos seus motoristas (direita). Usar uma lib como React Flow, ou SVG/CSS puro. O visual deve ser limpo, moderno e bonito, similar ao n8n.
+As rotas e vínculos já existem no Supabase:
+
+Tabela routes — 16 rotas já cadastradas (Caratinga 9 motoristas, Ubaporanga 4, Mutum 3, Raul Soares 3, etc.)
+Tabela driver_route_links — 40 vínculos motorista↔rota já cadastrados
+Tabela route_groups — 4 grupos já criados: Rota A (azul #3B82F6), Rota B (verde #10B981), Rota C (amarelo #F59E0B), Rota D (vermelho #EF4444)
+Tabela drivers — 45 motoristas (40 ativos + 5 excluídos)
+
+Funcionalidades:
+
+Visual workflow — Nós conectados com linhas entre rota → drivers, agrupados por Rota A/B/C/D com a cor do grupo.
+Criar novas rotas — Botão "Nova Rota" que abre modal para definir: nome da rota, grupo (A/B/C/D), CEPs associados (campo para adicionar vários), descrição. Salva na tabela routes.
+Vincular motoristas a rotas — Ao clicar numa rota, abrir painel/modal com todos os motoristas disponíveis em checkboxes. Selecionar os desejados e salvar. Cria registros na tabela driver_route_links.
+Atribuição em massa de grupos — Selecionar múltiplas rotas com checkboxes e atribuir todas a um grupo (A/B/C/D) de uma vez. Atualiza route_group na tabela routes.
+Seção "Sem Grupo" — Rotas com route_group = null aparecem numa seção separada "Sem Grupo Definido".
+Motoristas sem rota — Seção mostrando motoristas sem vínculo em driver_route_links (disponíveis para vincular).
+Drag and drop (desejável) — Arrastar motoristas entre rotas e rotas entre grupos.
+Edição inline — Clicar no nó da rota para editar nome, CEPs, grupo. Clicar no nó do driver para ver detalhes e desvincular.
+Busca e filtros — Buscar por nome de motorista ou rota, filtrar por grupo, por status.
+CEPs automáticos — Ao criar ou editar uma rota, sugerir CEPs consultando city_cache e route_mapping quando o nome da cidade bater.
+
+
+PARTE 3 — Histórico de Buscas
+A tabela search_history já existe no Supabase com: id (uuid), query (text), filters_used (jsonb), results_count (integer), source (text), created_at (timestamptz).
+
+Salvar automaticamente — Toda busca/pergunta na IA salva na tabela search_history com o texto, filtros usados e quantidade de resultados.
+Buscas recentes — No painel da IA, mostrar as últimas 20 buscas. Clicar numa busca antiga refaz ela.
+Buscas frequentes — Top 5 buscas mais repetidas (agrupar por query, contar ocorrências).
+Limpar histórico — Botão para apagar todo o histórico.
+Autocomplete — Ao digitar, sugerir buscas anteriores que correspondam.
+
+
+RESUMO DAS TABELAS NO SUPABASE (todas já existem, NÃO criar)
+TabelaColunas principaisRegistrosticketsticket_id, spxtn, driver, station, sla_deadline, pnr_value, rejection_reason, statusvariáveldriversid (bigserial), name, fixed_route, is_active, is_excluded, station, route_group, notes45routesid (uuid), name, route_group, ceps (text[]), description, is_active16driver_route_linksid (uuid), driver_id (→drivers.id), route_id (→routes.id), is_primary40route_groupsid (uuid), group_name, description, color4route_mappingspxtn, cepexistentecity_cachecep, city_infoexistentedriver_overridesdriver_name, overridden_route, is_excludedlegadodashboard_metakey, valueexistenteai_reportsid, title, user_prompt, ai_response, filters_applied, data_snapshot, report_type0search_historyid, query, filters_used, results_count, source, created_at0
+Conexão Supabase: já configurada nos Secrets (SUPABASE_URL e SUPABASE_ANON_KEY). Usar o cliente supabase já existente no projeto.
+
