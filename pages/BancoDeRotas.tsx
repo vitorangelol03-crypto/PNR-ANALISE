@@ -49,14 +49,26 @@ interface DragPayload {
   routeName?: string;
 }
 
-interface RadialMenuState {
+interface RadialMenuBase {
   origin: { x: number; y: number };
-  driverId: number;
-  driverName: string;
-  sourceRouteId?: string;
   expandedGroup: string | null;
   hoveredRouteId: string | null;
 }
+
+interface RadialMenuDriver extends RadialMenuBase {
+  mode: 'driver';
+  driverId: number;
+  driverName: string;
+  sourceRouteId?: string;
+}
+
+interface RadialMenuRoute extends RadialMenuBase {
+  mode: 'route';
+  routeId: string;
+  routeName: string;
+}
+
+type RadialMenuState = RadialMenuDriver | RadialMenuRoute;
 
 const DRAG_THRESHOLD = 6;
 const HOLD_DELAY = 300;
@@ -172,7 +184,7 @@ const BancoDeRotas: React.FC = () => {
     } catch { showToast('Erro ao vincular motorista', 'error'); }
   }, [links, routes, loadData]);
 
-  const radialPayloadRef = useRef<{ driverId: number; driverName: string; sourceRouteId?: string } | null>(null);
+  const radialPayloadRef = useRef<{ mode: 'driver'; driverId: number; driverName: string; sourceRouteId?: string } | { mode: 'route'; routeId: string; routeName: string } | null>(null);
 
   const onPointerDownDraggable = useCallback((
     e: React.PointerEvent,
@@ -191,22 +203,36 @@ const BancoDeRotas: React.FC = () => {
     if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
 
     const isDriver = payload.type === 'driver' && payload.driverId != null;
+    const isRoute = payload.type === 'route' && payload.routeId != null;
     const originX = e.clientX;
     const originY = e.clientY;
 
-    if (isDriver && groups.length > 0 && e.pointerType === 'mouse') {
+    if ((isDriver || isRoute) && groups.length > 0 && e.pointerType === 'mouse') {
       holdTimerRef.current = setTimeout(() => {
         holdFiredRef.current = true;
         pendingClickRef.current = null;
-        radialPayloadRef.current = { driverId: payload.driverId!, driverName: payload.driverName || '', sourceRouteId: payload.sourceRouteId };
-        setRadialMenu({
-          origin: { x: originX, y: originY },
-          driverId: payload.driverId!,
-          driverName: payload.driverName || '',
-          sourceRouteId: payload.sourceRouteId,
-          expandedGroup: null,
-          hoveredRouteId: null,
-        });
+        if (isDriver) {
+          radialPayloadRef.current = { mode: 'driver', driverId: payload.driverId!, driverName: payload.driverName || '', sourceRouteId: payload.sourceRouteId };
+          setRadialMenu({
+            mode: 'driver',
+            origin: { x: originX, y: originY },
+            driverId: payload.driverId!,
+            driverName: payload.driverName || '',
+            sourceRouteId: payload.sourceRouteId,
+            expandedGroup: null,
+            hoveredRouteId: null,
+          });
+        } else {
+          radialPayloadRef.current = { mode: 'route', routeId: payload.routeId!, routeName: payload.routeName || '' };
+          setRadialMenu({
+            mode: 'route',
+            origin: { x: originX, y: originY },
+            routeId: payload.routeId!,
+            routeName: payload.routeName || '',
+            expandedGroup: null,
+            hoveredRouteId: null,
+          });
+        }
       }, HOLD_DELAY);
     }
 
@@ -267,12 +293,27 @@ const BancoDeRotas: React.FC = () => {
         dragStartPosRef.current = null;
 
         const els = document.elementsFromPoint(ue.clientX, ue.clientY);
-        const routeEl = els.find(el => el.hasAttribute('data-radial-route-id'));
         setRadialMenu(null);
 
-        if (routeEl && rp) {
-          const targetRouteId = routeEl.getAttribute('data-radial-route-id')!;
-          await linkDriverToRoute(rp.driverId, rp.driverName, targetRouteId, rp.sourceRouteId);
+        if (rp?.mode === 'driver') {
+          const routeEl = els.find(el => el.hasAttribute('data-radial-route-id'));
+          if (routeEl) {
+            const targetRouteId = routeEl.getAttribute('data-radial-route-id')!;
+            await linkDriverToRoute(rp.driverId, rp.driverName, targetRouteId, rp.sourceRouteId);
+          }
+        } else if (rp?.mode === 'route') {
+          const groupEl = els.find(el => el.hasAttribute('data-radial-group'));
+          if (groupEl) {
+            const targetGroup = groupEl.getAttribute('data-radial-group')!;
+            const route = routes.find(r => r.id === rp.routeId);
+            if (route && route.route_group !== targetGroup) {
+              try {
+                await supabase.from('routes').update({ route_group: targetGroup }).eq('id', rp.routeId);
+                showToast(`📋 ${rp.routeName} movida para ${targetGroup}`);
+                await loadData();
+              } catch { showToast('Erro ao mover rota', 'error'); }
+            }
+          }
         }
         return;
       }
@@ -711,38 +752,52 @@ const RadialMenu: React.FC<{
         style={{ left: clampedOrigin.x, top: clampedOrigin.y, transform: 'translate(-50%, -50%)' }}
       >
         <div className="px-4 py-2 bg-white/95 backdrop-blur rounded-xl shadow-lg border border-gray-200 inline-block">
-          <p className="text-[10px] font-black text-gray-500 uppercase tracking-wide">Vincular: {menu.driverName}</p>
-          <p className="text-[8px] font-bold text-gray-400 mt-0.5">Arraste até o grupo e solte na rota</p>
+          {menu.mode === 'driver' ? (
+            <>
+              <p className="text-[10px] font-black text-gray-500 uppercase tracking-wide">Vincular: {menu.driverName}</p>
+              <p className="text-[8px] font-bold text-gray-400 mt-0.5">Arraste até o grupo e solte na rota</p>
+            </>
+          ) : (
+            <>
+              <p className="text-[10px] font-black text-gray-500 uppercase tracking-wide">Mover: {menu.routeName}</p>
+              <p className="text-[8px] font-bold text-gray-400 mt-0.5">Arraste até o grupo de destino e solte</p>
+            </>
+          )}
         </div>
       </div>
 
       {groupBubbles.map(({ group, x, y, routes: groupRoutes }, idx) => {
-        const isExpanded = menu.expandedGroup === group.group_name;
-        const isOther = menu.expandedGroup !== null && !isExpanded;
+        const isHovered = menu.expandedGroup === group.group_name;
+        const isOther = menu.expandedGroup !== null && !isHovered;
+        const isRouteMode = menu.mode === 'route';
         const bx = clampedOrigin.x + x;
         const by = clampedOrigin.y + y + 50;
 
         return (
-          <div key={group.id} style={{ position: 'absolute', left: bx, top: by, transform: 'translate(-50%, -50%)', zIndex: isExpanded ? 10 : 5, animation: `radialBubblePop 250ms ease-out ${idx * 60}ms both` }}>
+          <div key={group.id} style={{ position: 'absolute', left: bx, top: by, transform: 'translate(-50%, -50%)', zIndex: isHovered ? 10 : 5, animation: `radialBubblePop 250ms ease-out ${idx * 60}ms both` }}>
             <div
               data-radial-group={group.group_name}
               className="flex flex-col items-center justify-center rounded-full transition-all duration-300 border-2 shadow-lg pointer-events-auto"
               style={{
-                width: isExpanded ? 90 : 80,
-                height: isExpanded ? 90 : 80,
+                width: isHovered ? 95 : 80,
+                height: isHovered ? 95 : 80,
                 backgroundColor: group.color,
-                borderColor: `${group.color}cc`,
+                borderColor: isHovered && isRouteMode ? 'white' : `${group.color}cc`,
                 opacity: isOther ? 0.4 : 1,
                 transform: `scale(${isOther ? 0.85 : 1})`,
+                boxShadow: isHovered && isRouteMode ? `0 0 0 4px white, 0 0 20px ${group.color}80` : undefined,
               }}
             >
               <span className="text-white font-black text-[11px] md:text-xs uppercase tracking-tight text-center px-1 leading-tight pointer-events-none">
                 {group.group_name}
               </span>
               <span className="text-white/70 text-[8px] font-bold mt-0.5 pointer-events-none">{groupRoutes.length} rotas</span>
+              {isHovered && isRouteMode && (
+                <span className="text-white/90 text-[7px] font-bold mt-0.5 pointer-events-none">⬇ Solte aqui</span>
+              )}
             </div>
 
-            {isExpanded && groupRoutes.length > 0 && (
+            {!isRouteMode && isHovered && groupRoutes.length > 0 && (
               <div
                 className="absolute left-1/2 -translate-x-1/2 mt-3 bg-white rounded-2xl shadow-2xl border overflow-hidden min-w-[180px] max-w-[260px] max-h-[220px] overflow-y-auto pointer-events-auto"
                 style={{ borderColor: `${group.color}40`, top: '100%' }}
@@ -768,7 +823,7 @@ const RadialMenu: React.FC<{
                 </div>
               </div>
             )}
-            {isExpanded && groupRoutes.length === 0 && (
+            {!isRouteMode && isHovered && groupRoutes.length === 0 && (
               <div className="absolute left-1/2 -translate-x-1/2 mt-3 bg-white rounded-xl shadow-lg border border-gray-200 px-4 py-3 pointer-events-none" style={{ top: '100%' }}>
                 <p className="text-[10px] font-bold text-gray-400 italic whitespace-nowrap">Nenhuma rota neste grupo</p>
               </div>
@@ -917,7 +972,7 @@ const WorkflowRow: React.FC<{
           backgroundColor: isDragOver ? `${color}15` : 'white',
           ...(isDragOver ? { '--tw-ring-color': color } as any : {})
         }}
-        title="Arraste para mover de grupo · Clique para gerenciar motoristas"
+        title="Segure para atalho · Arraste para mover de grupo · Clique para gerenciar motoristas"
       >
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
