@@ -8,7 +8,7 @@ import AIAssistant from './components/AIAssistant';
 const App: React.FC = () => {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-[#0d1117]">
+      <div className="min-h-screen">
         <Header />
         <Routes>
           <Route path="/" element={<Dashboard />} />
